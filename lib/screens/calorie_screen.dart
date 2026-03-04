@@ -1,74 +1,674 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:provider/provider.dart';
-import '../theme/app_theme.dart';
-import '../widgets/common_widgets.dart';
-import '../providers/health_provider.dart';
-import 'dart:math' as math;
+// ─────────────────────────────────────────────────────────────────────────────
+//  GoFaster Health — Daily Fuel / Calorie Screen
+//
+//  On first open:
+//    1. Checks if Health Connect / HealthKit permission is already granted.
+//    2. If not → shows PermissionGateScreen overlay.
+//    3. If granted (or after grant) → auto-syncs real calorie / step data.
+//    4. Shows "Synced X min ago" badge when real data is live.
+//    5. If denied → falls back to Firestore / manual data silently.
+// ─────────────────────────────────────────────────────────────────────────────
 
-class CalorieScreen extends StatelessWidget {
+import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../theme/app_theme.dart';
+import '../providers/health_provider.dart';
+import '../services/health_sync_service.dart';
+import '../widgets/common_widgets.dart';
+import 'permission_gate_screen.dart';
+
+class CalorieScreen extends StatefulWidget {
   const CalorieScreen({super.key});
 
   @override
+  State<CalorieScreen> createState() => _CalorieScreenState();
+}
+
+class _CalorieScreenState extends State<CalorieScreen> {
+  static const _prefKey = 'calorie_health_asked';
+  bool _gateChecked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkPermission());
+  }
+
+  Future<void> _checkPermission() async {
+    if (!mounted) return;
+    final hp = context.read<HealthProvider>();
+
+    // ── 1. Already granted? Sync immediately ──────────────────────────────
+    final status = await hp.checkHealthPermission();
+    if (status == HealthPermissionStatus.granted) {
+      await hp.refreshHealthData();
+      if (mounted) setState(() => _gateChecked = true);
+      return;
+    }
+
+    // ── 2. Web / unsupported → skip gate ────────────────────────────────
+    if (kIsWeb || status == HealthPermissionStatus.notAvailable) {
+      if (mounted) setState(() => _gateChecked = true);
+      return;
+    }
+
+    // ── 3. First time? Show permission gate ──────────────────────────────
+    final prefs = await SharedPreferences.getInstance();
+    final alreadyAsked = prefs.getBool(_prefKey) ?? false;
+    if (!alreadyAsked && mounted) {
+      await prefs.setBool(_prefKey, true);
+      if (!mounted) return;
+      final granted = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const PermissionGateScreen(context: 'calories'),
+        ),
+      );
+      if ((granted ?? false) && mounted) {
+        await hp.refreshHealthData();
+      }
+    }
+
+    if (mounted) setState(() => _gateChecked = true);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final health = context.watch<HealthProvider>();
+    final hp = context.watch<HealthProvider>();
+
+    if (hp.isLoading || !_gateChecked) {
+      return const Scaffold(
+        backgroundColor: AppColors.background,
+        body: Center(
+          child: CircularProgressIndicator(
+            color: AppColors.primary, strokeWidth: 2,
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: AppColors.bgDarkAlt,
-      body: Stack(
-        children: [
-          GlowBlob(color: AppColors.neonOrange, size: 320, alignment: const Alignment(0.7, -0.6), opacity: 0.1),
-          GlowBlob(color: AppColors.primary, size: 280, alignment: const Alignment(-0.9, 0.6), opacity: 0.08),
-          SafeArea(
+      backgroundColor: AppColors.background,
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        backgroundColor: AppColors.cardBg,
+        onRefresh: () async {
+          final status = await hp.checkHealthPermission();
+          if (status == HealthPermissionStatus.granted) {
+            await hp.refreshHealthData();
+          }
+        },
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          slivers: [
+            _header(hp),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  // ── Sync status banner ──────────────────────────────────
+                  _SyncBanner(hp: hp).animate().fade(duration: 400.ms),
+                  if (hp.syncLabel.isNotEmpty) const SizedBox(height: 12),
+
+                  _CalorieSummary(hp: hp).animate().fade(duration: 500.ms),
+                  const SizedBox(height: 20),
+                  _MacrosCard(hp: hp)
+                      .animate(delay: 100.ms).fade(duration: 500.ms),
+                  const SizedBox(height: 20),
+                  _StepsCard(hp: hp)
+                      .animate(delay: 150.ms).fade(duration: 500.ms),
+                  // Show heart rate card when synced
+                  if (hp.heartRateBpm > 0) ...[
+                    const SizedBox(height: 20),
+                    _HeartRateCard(hp: hp)
+                        .animate(delay: 175.ms).fade(duration: 500.ms),
+                  ],
+                  const SizedBox(height: 20),
+                  _MealLog().animate(delay: 200.ms).fade(duration: 500.ms),
+                  const SizedBox(height: 20),
+                  _CalorieTip().animate(delay: 250.ms).fade(duration: 500.ms),
+                ]),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  SliverAppBar _header(HealthProvider hp) {
+    return SliverAppBar(
+      pinned: false,
+      floating: true,
+      snap: false,
+      automaticallyImplyLeading: false,
+      toolbarHeight: 56,
+      backgroundColor: AppColors.background,
+      surfaceTintColor: Colors.transparent,
+      flexibleSpace: FlexibleSpaceBar(
+        background: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.background,
+            border: Border(
+              bottom: BorderSide(color: AppColors.border, width: 0.5),
+            ),
+          ),
+          child: SafeArea(
             bottom: false,
+            child: SizedBox(
+              height: 56,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Daily Fuel', style: AppTextStyles.h3),
+                    hp.syncLabel.isNotEmpty
+                        ? _SyncChip(label: hp.syncLabel)
+                        : GFTag(label: 'Today', color: AppColors.primary),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Sync Status Banner ────────────────────────────────────────────────────────
+class _SyncBanner extends StatelessWidget {
+  final HealthProvider hp;
+  const _SyncBanner({required this.hp});
+
+  @override
+  Widget build(BuildContext context) {
+    if (hp.healthSyncing) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 16, height: 16,
+              child: CircularProgressIndicator(
+                color: AppColors.primary, strokeWidth: 2,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Syncing activity data from '
+              '${hp.healthSource.isEmpty ? "Health" : hp.healthSource}…',
+              style: AppTextStyles.bodySm.copyWith(color: AppColors.primary),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (hp.healthSyncError != null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.error.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.error.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 16),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Health sync unavailable — showing saved data',
+                style: AppTextStyles.bodySm.copyWith(color: AppColors.error),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (hp.syncLabel.isNotEmpty && hp.healthSource.isNotEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.success.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.success.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 16),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '${hp.syncLabel} from ${hp.healthSource} · Pull to refresh',
+                style: AppTextStyles.bodySm.copyWith(color: AppColors.success),
+              ),
+            ),
+            const Icon(Icons.refresh_rounded, color: AppColors.success, size: 16),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+// ── Sync chip (header) ────────────────────────────────────────────────────────
+class _SyncChip extends StatelessWidget {
+  final String label;
+  const _SyncChip({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.success.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(color: AppColors.success.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6, height: 6,
+            decoration: const BoxDecoration(
+              color: AppColors.success, shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(label,
+            style: AppTextStyles.tag.copyWith(color: AppColors.success),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Calorie Summary ──────────────────────────────────────────────────────────
+class _CalorieSummary extends StatelessWidget {
+  final HealthProvider hp;
+  const _CalorieSummary({required this.hp});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppColors.cardBg,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.12),
+            blurRadius: 25,
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Burned', style: AppTextStyles.label),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${hp.caloriesBurned.toInt()}',
+                    style: AppTextStyles.scoreLg.copyWith(color: AppColors.primary),
+                  ),
+                  Text('kcal', style: AppTextStyles.bodySm),
+                ],
+              ),
+              GlowRing(
+                progress: hp.caloriesProgress,
+                size: 120,
+                strokeWidth: 10,
+                gradientColors: const [AppColors.primary, AppColors.accent],
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.local_fire_department_rounded,
+                      color: AppColors.primary, size: 20,
+                    ),
+                    Text(
+                      '${(hp.caloriesProgress * 100).toInt()}%',
+                      style: AppTextStyles.h3.copyWith(color: AppColors.textPrimary),
+                    ),
+                    Text('goal', style: AppTextStyles.label),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('Consumed', style: AppTextStyles.label),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${hp.caloriesConsumed.toInt()}',
+                    style: AppTextStyles.scoreLg.copyWith(
+                      color: const Color(0xFF42A5F5),
+                    ),
+                  ),
+                  Text('kcal', style: AppTextStyles.bodySm),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Container(height: 1, color: AppColors.border),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(child: _CalStat(
+                label: 'Goal',
+                value: '${hp.caloriesGoal.toInt()} kcal',
+                color: AppColors.textSecondary,
+              )),
+              Expanded(child: _CalStat(
+                label: 'Remaining',
+                value: '${hp.caloriesRemaining.toInt()} kcal',
+                color: hp.caloriesRemaining >= 0
+                    ? AppColors.success
+                    : AppColors.error,
+              )),
+              Expanded(child: _CalStat(
+                label: 'Active Min',
+                value: '${hp.activeMinutes} min',
+                color: AppColors.accent,
+              )),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CalStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+  const _CalStat({required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(value, style: AppTextStyles.h5.copyWith(color: color)),
+        const SizedBox(height: 2),
+        Text(label, style: AppTextStyles.label),
+      ],
+    );
+  }
+}
+
+// ─── Macros Card ──────────────────────────────────────────────────────────────
+class _MacrosCard extends StatelessWidget {
+  final HealthProvider hp;
+  const _MacrosCard({required this.hp});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = hp.proteinG + hp.carbsG + hp.fatsG;
+    return GFCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionHeader(title: 'Macros Breakdown'),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    _MacroBar(
+                      label: 'Protein',
+                      grams: hp.proteinG,
+                      total: total,
+                      color: AppColors.primary,
+                    ),
+                    const SizedBox(height: 10),
+                    _MacroBar(
+                      label: 'Carbs',
+                      grams: hp.carbsG,
+                      total: total,
+                      color: AppColors.accent,
+                    ),
+                    const SizedBox(height: 10),
+                    _MacroBar(
+                      label: 'Fats',
+                      grams: hp.fatsG,
+                      total: total,
+                      color: AppColors.success,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 20),
+              SizedBox(
+                width: 80, height: 80,
+                child: CustomPaint(
+                  painter: _DonutPainter(
+                    values: [hp.proteinG, hp.carbsG, hp.fatsG],
+                    colors: [AppColors.primary, AppColors.accent, AppColors.success],
+                  ),
+                  child: Center(
+                    child: Text(
+                      '${total.toInt()}g',
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MacroBar extends StatelessWidget {
+  final String label;
+  final double grams;
+  final double total;
+  final Color color;
+
+  const _MacroBar({
+    required this.label, required this.grams,
+    required this.total, required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total > 0 ? grams / total : 0.0;
+    return Row(
+      children: [
+        SizedBox(
+          width: 52,
+          child: Text(
+            label,
+            style: AppTextStyles.label.copyWith(color: AppColors.textSecondary),
+          ),
+        ),
+        Expanded(
+          child: Container(
+            height: 6,
+            decoration: BoxDecoration(
+              color: AppColors.border,
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: pct,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(3),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.4), blurRadius: 4,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '${grams.toInt()}g',
+          style: AppTextStyles.caption.copyWith(
+            color: color, fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DonutPainter extends CustomPainter {
+  final List<double> values;
+  final List<Color> colors;
+  _DonutPainter({required this.values, required this.colors});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final total = values.reduce((a, b) => a + b);
+    if (total == 0) return;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+    const strokeWidth = 12.0;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    double start = -math.pi / 2;
+    for (int i = 0; i < values.length; i++) {
+      final sweep = (values[i] / total) * math.pi * 2 * 0.9;
+      paint.color = colors[i];
+      canvas.drawArc(
+        Rect.fromCircle(
+          center: center, radius: radius - strokeWidth / 2,
+        ),
+        start, sweep, false, paint,
+      );
+      start += sweep + 0.1;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DonutPainter old) => old.values != values;
+}
+
+// ─── Steps Card ───────────────────────────────────────────────────────────────
+class _StepsCard extends StatelessWidget {
+  final HealthProvider hp;
+  const _StepsCard({required this.hp});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = hp.steps / 10000;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppColors.primary.withValues(alpha: 0.12),
+            AppColors.accent.withValues(alpha: 0.06),
+          ],
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52, height: 52,
+            decoration: BoxDecoration(
+              gradient: AppGradients.fire,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.directions_walk_rounded,
+              color: Colors.white, size: 28,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Calorie Dashboard', style: AppTextStyles.headingMd),
-                          const SizedBox(height: 3),
-                          Row(
-                            children: [
-                              const Icon(Icons.sync_rounded, color: AppColors.accentGreen, size: 14),
-                              const SizedBox(width: 4),
-                              Text('SYNCED WITH APPLE HEALTH',
-                                style: AppTextStyles.label.copyWith(color: AppColors.textMuted, fontSize: 9, letterSpacing: 1)),
-                            ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Steps Today', style: AppTextStyles.h5),
+                    Text('Goal: 10,000', style: AppTextStyles.bodySm),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Text(
+                      hp.steps.toString().replaceAllMapped(
+                        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+                        (m) => '${m[1]},',
+                      ),
+                      style: AppTextStyles.h3.copyWith(color: AppColors.primary),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${(pct * 100).toInt()}%',
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.success,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: pct.clamp(0.0, 1.0),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: AppGradients.fire,
+                        borderRadius: BorderRadius.circular(3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.4),
+                            blurRadius: 8,
                           ),
                         ],
                       ),
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: glassDecoration(borderRadius: 14),
-                        child: const Icon(Icons.notifications_rounded, color: AppColors.textSecondary, size: 18),
-                      ),
-                    ],
-                  ).animate().fadeIn(duration: 400.ms),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 20),
-                        _BurnGauge(health: health).animate().fadeIn(delay: 100.ms, duration: 600.ms),
-                        const SizedBox(height: 20),
-                        _ConsumedRemaining(health: health).animate().fadeIn(delay: 200.ms, duration: 500.ms),
-                        const SizedBox(height: 16),
-                        _MacroBreakdown(health: health).animate().fadeIn(delay: 300.ms, duration: 500.ms),
-                        const SizedBox(height: 16),
-                        _MealLog().animate().fadeIn(delay: 400.ms, duration: 500.ms),
-                        const SizedBox(height: 16),
-                        _NutritionTip().animate().fadeIn(delay: 500.ms, duration: 500.ms),
-                        const SizedBox(height: 110),
-                      ],
                     ),
                   ),
                 ),
@@ -81,198 +681,99 @@ class CalorieScreen extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────
-//  Circular Burn Gauge
-// ─────────────────────────────────────────────────────
-class _BurnGauge extends StatelessWidget {
-  final HealthProvider health;
-  const _BurnGauge({required this.health});
+// ─── Heart Rate Card (visible only when synced) ───────────────────────────────
+class _HeartRateCard extends StatelessWidget {
+  final HealthProvider hp;
+  const _HeartRateCard({required this.hp});
 
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SizedBox(
-          width: 220,
-          height: 220,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              CustomPaint(
-                size: const Size(220, 220),
-                painter: _GaugePainter(
-                  progress: health.caloriesProgress,
-                  color: AppColors.primary,
-                ),
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(health.caloriesBurned.toInt().toString(),
-                    style: AppTextStyles.headingXL.copyWith(fontSize: 42)),
-                  Text('/ 900 kcal',
-                    style: AppTextStyles.body.copyWith(color: AppColors.textMuted)),
-                  const SizedBox(height: 6),
-                  NeonBadge(label: 'Burned', color: AppColors.primary),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _StatPill(label: 'Steps', value: '${health.steps.toStringAsFixed(0).replaceAll(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), r'$1,')}'),
-            Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1), margin: const EdgeInsets.symmetric(horizontal: 24)),
-            _StatPill(label: 'Active', value: '${health.activeMinutes} min'),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _GaugePainter extends CustomPainter {
-  final double progress;
-  final Color color;
-
-  _GaugePainter({required this.progress, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = (size.width - 18) / 2;
-
-    // Track
-    canvas.drawCircle(center, radius, Paint()
-      ..color = Colors.white.withValues(alpha: 0.05)
-      ..strokeWidth = 12
-      ..style = PaintingStyle.stroke);
-
-    // Glow
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      -math.pi / 2,
-      2 * math.pi * progress,
-      false,
-      Paint()
-        ..color = color.withValues(alpha: 0.35)
-        ..strokeWidth = 18
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
-    );
-
-    // Arc
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      -math.pi / 2,
-      2 * math.pi * progress,
-      false,
-      Paint()
-        ..color = color
-        ..strokeWidth = 12
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round,
-    );
+  String get _zone {
+    final bpm = hp.heartRateBpm;
+    if (bpm < 60) return 'Resting';
+    if (bpm < 100) return 'Normal';
+    if (bpm < 140) return 'Fat Burn';
+    if (bpm < 170) return 'Cardio';
+    return 'Peak';
   }
 
-  @override
-  bool shouldRepaint(_GaugePainter old) => old.progress != progress;
-}
-
-class _StatPill extends StatelessWidget {
-  final String label;
-  final String value;
-  const _StatPill({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(label, style: AppTextStyles.label.copyWith(color: AppColors.textMuted)),
-        const SizedBox(height: 4),
-        Text(value, style: AppTextStyles.headingSm.copyWith(fontSize: 18)),
-      ],
-    );
+  Color get _zoneColor {
+    final bpm = hp.heartRateBpm;
+    if (bpm < 60) return AppColors.textSecondary;
+    if (bpm < 100) return AppColors.success;
+    if (bpm < 140) return AppColors.accent;
+    if (bpm < 170) return AppColors.warning;
+    return AppColors.error;
   }
-}
-
-// ─────────────────────────────────────────────────────
-//  Consumed / Remaining Cards
-// ─────────────────────────────────────────────────────
-class _ConsumedRemaining extends StatelessWidget {
-  final HealthProvider health;
-  const _ConsumedRemaining({required this.health});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(child: _MetricTile(
-          dot: AppColors.accentBlue,
-          label: 'Consumed',
-          value: '${health.caloriesConsumed.toInt()}',
-          unit: 'kcal',
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: _MetricTile(
-          dot: AppColors.primary,
-          label: 'Remaining',
-          value: '${health.caloriesRemaining.toInt()}',
-          unit: 'kcal',
-          valueColor: AppColors.primary,
-        )),
-      ],
-    );
-  }
-}
-
-class _MetricTile extends StatelessWidget {
-  final Color dot;
-  final String label;
-  final String value;
-  final String unit;
-  final Color? valueColor;
-
-  const _MetricTile({
-    required this.dot,
-    required this.label,
-    required this.value,
-    required this.unit,
-    this.valueColor,
-  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: glassDecoration(borderRadius: 22),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.cardBg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.error.withValues(alpha: 0.2)),
+      ),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(width: 8, height: 8, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
-              const SizedBox(width: 6),
-              Text(label.toUpperCase(),
-                style: AppTextStyles.label.copyWith(color: AppColors.textMuted, fontSize: 9, letterSpacing: 1.2)),
-            ],
+          Container(
+            width: 52, height: 52,
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.favorite_rounded,
+              color: AppColors.error, size: 28,
+            ),
           ),
-          const SizedBox(height: 10),
-          RichText(
-            text: TextSpan(
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TextSpan(
-                  text: value,
-                  style: AppTextStyles.headingLg.copyWith(
-                    color: valueColor ?? AppColors.textPrimary,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Avg Heart Rate', style: AppTextStyles.h5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _zoneColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(50),
+                      ),
+                      child: Text(
+                        _zone,
+                        style: AppTextStyles.tag.copyWith(color: _zoneColor),
+                      ),
+                    ),
+                  ],
                 ),
-                TextSpan(
-                  text: ' $unit',
-                  style: AppTextStyles.body.copyWith(color: AppColors.textMuted, fontSize: 12),
+                const SizedBox(height: 4),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '${hp.heartRateBpm.toInt()}',
+                      style: AppTextStyles.h2.copyWith(color: AppColors.error),
+                    ),
+                    const SizedBox(width: 4),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        'bpm',
+                        style: AppTextStyles.bodySm.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  'From ${hp.healthSource}',
+                  style: AppTextStyles.caption.copyWith(
+                    color: AppColors.textMuted,
+                  ),
                 ),
               ],
             ),
@@ -283,174 +784,60 @@ class _MetricTile extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────
-//  Macro Breakdown (Donut)
-// ─────────────────────────────────────────────────────
-class _MacroBreakdown extends StatelessWidget {
-  final HealthProvider health;
-  const _MacroBreakdown({required this.health});
-
-  @override
-  Widget build(BuildContext context) {
-    final total = health.proteinG + health.carbsG + health.fatsG;
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: glassDecoration(borderRadius: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Macro Breakdown', style: AppTextStyles.headingMd),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              SizedBox(
-                width: 110,
-                height: 110,
-                child: CustomPaint(
-                  painter: _DonutPainter(
-                    values: [health.proteinG, health.carbsG, health.fatsG],
-                    total: total,
-                    colors: [AppColors.primary, AppColors.accentBlue, AppColors.accentGreen],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 24),
-              Expanded(
-                child: Column(
-                  children: [
-                    _MacroRow(color: AppColors.primary, label: 'Protein', value: '${health.proteinG.toInt()}g'),
-                    const SizedBox(height: 14),
-                    _MacroRow(color: AppColors.accentBlue, label: 'Carbs', value: '${health.carbsG.toInt()}g'),
-                    const SizedBox(height: 14),
-                    _MacroRow(color: AppColors.accentGreen, label: 'Fats', value: '${health.fatsG.toInt()}g'),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DonutPainter extends CustomPainter {
-  final List<double> values;
-  final double total;
-  final List<Color> colors;
-
-  _DonutPainter({required this.values, required this.total, required this.colors});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 6;
-    double startAngle = -math.pi / 2;
-    const strokeWidth = 16.0;
-
-    for (int i = 0; i < values.length; i++) {
-      final sweep = 2 * math.pi * (values[i] / total);
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle,
-        sweep - 0.04,
-        false,
-        Paint()
-          ..color = colors[i]
-          ..strokeWidth = strokeWidth
-          ..style = PaintingStyle.stroke
-          ..strokeCap = StrokeCap.round,
-      );
-      startAngle += sweep;
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DonutPainter old) => false;
-}
-
-class _MacroRow extends StatelessWidget {
-  final Color color;
-  final String label;
-  final String value;
-  const _MacroRow({required this.color, required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Row(
-          children: [
-            Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-            const SizedBox(width: 8),
-            Text(label, style: AppTextStyles.body.copyWith(color: AppColors.textSecondary, fontSize: 13)),
-          ],
-        ),
-        Text(value, style: AppTextStyles.bodyMedium.copyWith(fontSize: 14)),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────
-//  Meal Log
-// ─────────────────────────────────────────────────────
+// ─── Meal Log ─────────────────────────────────────────────────────────────────
 class _MealLog extends StatelessWidget {
-  const _MealLog();
+  static const _meals = [
+    _Meal('Breakfast', '7:30 AM', Icons.free_breakfast_rounded, 420, AppColors.accent),
+    _Meal('Lunch', '1:00 PM', Icons.lunch_dining_rounded, 580, AppColors.primary),
+    _Meal('Snack', '4:30 PM', Icons.apple_rounded, 200, AppColors.success),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final meals = [
-      _Meal('Post-Run Smoothie', '08:30 AM', 250, AppColors.accentBlue, Icons.blender_rounded),
-      _Meal('Quinoa Salad Bowl', '01:15 PM', 480, AppColors.accentGreen, Icons.restaurant_rounded),
-      _Meal('Greek Yogurt', '04:00 PM', 120, AppColors.primary, Icons.icecream_rounded),
-    ];
-
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Recent Meals', style: AppTextStyles.headingMd),
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-              child: const Icon(Icons.add_rounded, color: Colors.white, size: 20),
-            ),
-          ],
+        SectionHeader(
+          title: 'Meal Log',
+          action: 'Add Meal',
+          onAction: () {},
         ),
-        const SizedBox(height: 12),
-        ...meals.map((m) => Padding(
+        const SizedBox(height: 14),
+        ..._meals.map((m) => Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: glassDecoration(borderRadius: 20),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
             child: Row(
               children: [
                 Container(
-                  width: 48,
-                  height: 48,
+                  width: 42, height: 42,
                   decoration: BoxDecoration(
-                    color: m.color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(14),
+                    color: m.color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(m.icon, color: m.color, size: 22),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(m.name, style: AppTextStyles.bodyMedium.copyWith(fontSize: 14)),
-                      const SizedBox(height: 2),
-                      Text(m.time, style: AppTextStyles.caption.copyWith(color: AppColors.textMuted, fontSize: 10)),
+                      Text(m.name, style: AppTextStyles.h5),
+                      Text(m.time, style: AppTextStyles.bodySm),
                     ],
                   ),
                 ),
-                Text('${m.calories} kcal',
-                  style: AppTextStyles.bodyMedium.copyWith(fontSize: 13)),
+                Text(
+                  '${m.cal} kcal',
+                  style: AppTextStyles.body.copyWith(
+                    color: m.color, fontWeight: FontWeight.w700,
+                  ),
+                ),
               ],
             ),
           ),
@@ -461,68 +848,23 @@ class _MealLog extends StatelessWidget {
 }
 
 class _Meal {
-  final String name, time;
-  final int calories;
-  final Color color;
+  final String  name;
+  final String  time;
   final IconData icon;
-  const _Meal(this.name, this.time, this.calories, this.color, this.icon);
+  final int     cal;
+  final Color   color;
+  const _Meal(this.name, this.time, this.icon, this.cal, this.color);
 }
 
-// ─────────────────────────────────────────────────────
-//  Nutrition Tip
-// ─────────────────────────────────────────────────────
-class _NutritionTip extends StatelessWidget {
-  const _NutritionTip();
-
+// ─── Tip ──────────────────────────────────────────────────────────────────────
+class _CalorieTip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.lightbulb_rounded, color: AppColors.primary, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: RichText(
-              text: const TextSpan(
-                children: [
-                  TextSpan(
-                    text: 'GoFaster Tip: ',
-                    style: TextStyle(
-                      fontFamily: AppTextStyles.fontFamily,
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                  TextSpan(
-                    text: 'Vitamin C boosts iron absorption — eat it with meals to maximize recovery.',
-                    style: TextStyle(
-                      fontFamily: AppTextStyles.fontFamily,
-                      color: AppColors.textSecondary,
-                      fontSize: 13,
-                      height: 1.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
+    return InfoBanner(
+      message:
+          'Protein-rich meals boost metabolism and keep you fuller for 3x longer than carbs alone.',
+      icon: Icons.local_fire_department_rounded,
+      color: AppColors.primary,
     );
   }
 }

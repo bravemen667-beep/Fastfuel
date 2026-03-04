@@ -1,9 +1,18 @@
+// ─────────────────────────────────────────────────────────────────────────────
+//  GoFaster Health — Workout Screen
+//  ExerciseDB API for exercise data + Claude AI for personalised suggestions.
+//  Shows workout cards: name, sets, reps, muscle group, difficulty, Start button.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/app_theme.dart';
-import '../widgets/common_widgets.dart';
 import '../providers/health_provider.dart';
+import '../widgets/common_widgets.dart';
+import '../widgets/nav_aware_scaffold.dart';
+import '../services/exercise_service.dart';
+import '../services/claude_workout_service.dart';
 
 class WorkoutScreen extends StatefulWidget {
   const WorkoutScreen({super.key});
@@ -14,186 +23,218 @@ class WorkoutScreen extends StatefulWidget {
 
 class _WorkoutScreenState extends State<WorkoutScreen> {
   int _selectedCategory = 0;
+  final List<String> _categories = ['HIIT', 'Strength', 'Cardio', 'Yoga', 'Recovery', 'MMA'];
+
+  WorkoutPlan? _aiPlan;
+  List<ExerciseItem> _exercises = [];
+  bool _loadingAI  = false;
+  bool _loadingExercises = false;
+  String? _aiError;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadAll());
+  }
+
+  Future<void> _loadAll() async {
+    await Future.wait([_generateAIPlan(), _loadExercises()]);
+  }
+
+  Future<void> _generateAIPlan() async {
+    setState(() { _loadingAI = true; _aiError = null; });
+    final hp = context.read<HealthProvider>();
+    try {
+      final plan = await ClaudeWorkoutService.instance.generatePlan(
+        goFasterScore:  hp.score,
+        sleepDuration:  hp.sleepDuration,
+        sleepScore:     hp.sleepScore,
+        fitnessGoal:    hp.fitnessGoal,
+        fitnessLevel:   hp.fitnessLevel,
+        workoutType:    _categories[_selectedCategory],
+        activeMinutes:  hp.activeMinutes,
+      );
+      if (mounted) setState(() { _aiPlan = plan; _loadingAI = false; });
+    } catch (e) {
+      if (mounted) setState(() { _loadingAI = false; _aiError = 'AI suggestion unavailable'; });
+    }
+  }
+
+  Future<void> _loadExercises() async {
+    setState(() => _loadingExercises = true);
+    final bodyPart = _bodyPartForCategory(_categories[_selectedCategory]);
+    final items = await ExerciseService.instance.fetchByBodyPart(bodyPart);
+    if (mounted) setState(() { _exercises = items; _loadingExercises = false; });
+  }
+
+  String _bodyPartForCategory(String cat) {
+    switch (cat) {
+      case 'Strength':  return 'chest';
+      case 'Cardio':    return 'cardio';
+      case 'Yoga':
+      case 'Recovery':  return 'back';
+      case 'MMA':       return 'waist';
+      default:          return 'cardio'; // HIIT
+    }
+  }
+
+  void _onCategoryChange(int i) {
+    setState(() => _selectedCategory = i);
+    _loadAll();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final health = context.watch<HealthProvider>();
-    return Scaffold(
-      backgroundColor: const Color(0xFF1C1C1E),
-      body: Stack(
-        children: [
-          GlowBlob(color: AppColors.primary, size: 320, alignment: const Alignment(-0.5, -0.7), opacity: 0.1),
-          GlowBlob(color: AppColors.neonBlue, size: 250, alignment: const Alignment(0.8, 0.3), opacity: 0.06),
+    final hp = context.watch<HealthProvider>();
+    return NavAwareScaffold(
+      activeTab: 0,
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        backgroundColor: AppColors.cardBg,
+        onRefresh: _loadAll,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          slivers: [
+            _buildHeader(context),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  _RecoveryAlert(hp: hp).animate().fade(duration: 500.ms),
+                  const SizedBox(height: 20),
 
-          SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                // ── Header ────────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.chevron_left_rounded, color: Colors.white, size: 24),
-                      ),
-                      const Expanded(
-                        child: Center(child: Text('Your GoFaster Workout',
-                          style: AppTextStyles.headingSm)),
-                      ),
-                      Stack(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.06),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(Icons.notifications_rounded, color: Colors.white, size: 22),
-                          ),
-                          Positioned(
-                            right: 9,
-                            top: 9,
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: AppColors.primary,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: const Color(0xFF1C1C1E), width: 1.5),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ).animate().fadeIn(duration: 400.ms),
+                  // ── Claude AI Plan ─────────────────────────────────────
+                  if (_loadingAI)
+                    _AiLoadingCard().animate().fade(duration: 400.ms)
+                  else if (_aiPlan != null)
+                    _AiPlanCard(plan: _aiPlan!).animate(delay: 100.ms).fade(duration: 500.ms)
+                  else if (_aiError != null)
+                    _buildAiError(),
+
+                  const SizedBox(height: 20),
+
+                  // ── Category chips ─────────────────────────────────────
+                  _CategoryChips(
+                    categories: _categories,
+                    selected: _selectedCategory,
+                    onSelect: _onCategoryChange,
+                  ).animate(delay: 150.ms).fade(duration: 500.ms),
+
+                  const SizedBox(height: 20),
+
+                  // ── Exercise cards from ExerciseDB ─────────────────────
+                  _ExerciseList(
+                    exercises: _exercises,
+                    loading: _loadingExercises,
+                  ).animate(delay: 200.ms).fade(duration: 500.ms),
+                ]),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAiError() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(children: [
+        const Icon(Icons.auto_awesome_rounded, color: AppColors.textMuted, size: 18),
+        const SizedBox(width: 10),
+        Expanded(child: Text(_aiError!, style: AppTextStyles.bodySm)),
+        GestureDetector(
+          onTap: _generateAIPlan,
+          child: Text('Retry', style: AppTextStyles.label.copyWith(color: AppColors.primary)),
+        ),
+      ]),
+    );
+  }
+
+  SliverAppBar _buildHeader(BuildContext context) {
+    return SliverAppBar(
+      expandedHeight: 70,
+      floating: true,
+      backgroundColor: AppColors.background,
+      surfaceTintColor: Colors.transparent,
+      leading: Navigator.canPop(context)
+          ? GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                margin: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
                 ),
-
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 16),
-
-                        // ── Recovery Alert ───────────────
-                        _RecoveryAlert()
-                          .animate().fadeIn(delay: 100.ms, duration: 500.ms),
-                        const SizedBox(height: 20),
-
-                        // ── AI Insight ───────────────────
-                        _AIInsightCard(health: health)
-                          .animate().fadeIn(delay: 200.ms, duration: 500.ms),
-                        const SizedBox(height: 20),
-
-                        // ── Category Chips ───────────────
-                        _CategoryChips(
-                          categories: health.workoutCategories,
-                          selectedIndex: _selectedCategory,
-                          onSelected: (i) => setState(() => _selectedCategory = i),
-                        ).animate().fadeIn(delay: 300.ms, duration: 500.ms),
-                        const SizedBox(height: 20),
-
-                        // ── Workout Cards ────────────────
-                        _WorkoutCardsList(cards: health.workoutCards)
-                          .animate().fadeIn(delay: 400.ms, duration: 500.ms),
-
-                        const SizedBox(height: 110),
-                      ],
-                    ),
-                  ),
+                child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
+              ),
+            )
+          : null,
+      flexibleSpace: FlexibleSpaceBar(
+        background: Container(
+          padding: const EdgeInsets.fromLTRB(60, 0, 20, 0),
+          decoration: const BoxDecoration(
+            color: AppColors.background,
+            border: Border(bottom: BorderSide(color: AppColors.border, width: 0.5)),
+          ),
+          child: SafeArea(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('AI Workouts', style: AppTextStyles.h3),
+                Row(
+                  children: [
+                    const Icon(Icons.auto_awesome_rounded, color: AppColors.accent, size: 16),
+                    const SizedBox(width: 4),
+                    Text('Claude AI', style: AppTextStyles.caption.copyWith(color: AppColors.accent)),
+                  ],
                 ),
               ],
             ),
           ),
-
-          // ── Start Workout Floating CTA ────────────────
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [
-                    const Color(0xFF1C1C1E),
-                    const Color(0xFF1C1C1E).withValues(alpha: 0.0),
-                  ],
-                ),
-              ),
-              child: GradientButton(
-                label: 'Start Workout',
-                icon: Icons.play_circle_fill_rounded,
-                gradient: AppGradients.actionGradient,
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────
-//  Recovery Alert Banner
-// ─────────────────────────────────────────────────────
+// ── Recovery Alert ────────────────────────────────────────────────────────────
 class _RecoveryAlert extends StatelessWidget {
-  const _RecoveryAlert();
+  final HealthProvider hp;
+  const _RecoveryAlert({required this.hp});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF59E0B).withValues(alpha: 0.06),
+        color: AppColors.primary.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.25)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 40, height: 40,
             decoration: BoxDecoration(
-              color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
-              shape: BoxShape.circle,
+              gradient: AppGradients.fire, borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.warning_rounded, color: Color(0xFFF59E0B), size: 20),
+            child: const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Recovery Alert',
-                  style: TextStyle(
-                    fontFamily: AppTextStyles.fontFamily,
-                    color: Color(0xFFF59E0B),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  )),
-                SizedBox(height: 4),
-                Text(
-                  'Your HRV is lower than usual. Consider a guided yoga session today to prevent overtraining.',
-                  style: TextStyle(
-                    fontFamily: AppTextStyles.fontFamily,
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    height: 1.5,
-                  ),
+                Text('Recovery Alert', style: AppTextStyles.h5.copyWith(color: AppColors.primary)),
+                Text('Sleep: ${hp.sleepDuration} · Score ${hp.sleepScore.toInt()}. Adjust intensity accordingly.',
+                  style: AppTextStyles.bodySm,
                 ),
               ],
             ),
@@ -204,162 +245,356 @@ class _RecoveryAlert extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────
-//  AI Recommendation Card
-// ─────────────────────────────────────────────────────
-class _AIInsightCard extends StatelessWidget {
-  final HealthProvider health;
-  const _AIInsightCard({required this.health});
-
+// ── AI Loading Card ────────────────────────────────────────────────────────────
+class _AiLoadingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        color: AppColors.cardBg,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.border),
       ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -20,
-            right: -20,
-            child: Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(colors: [
-                  AppColors.primary.withValues(alpha: 0.15),
-                  Colors.transparent,
-                ]),
-              ),
-            ),
-          ),
-          Column(
+      child: Row(children: [
+        const SizedBox(
+          width: 20, height: 20,
+          child: CircularProgressIndicator(color: AppColors.accent, strokeWidth: 2),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.auto_awesome_rounded, color: AppColors.primary, size: 16),
-                  const SizedBox(width: 6),
-                  Text('AI RECOMMENDATION',
-                    style: AppTextStyles.label.copyWith(color: AppColors.primary, letterSpacing: 1.5)),
-                ],
+              Text('Claude AI is crafting your plan…',
+                style: AppTextStyles.h5.copyWith(color: AppColors.accent),
               ),
-              const SizedBox(height: 12),
-              RichText(
-                text: TextSpan(
-                  style: const TextStyle(
-                    fontFamily: AppTextStyles.fontFamily,
-                    color: AppColors.textSecondary,
-                    fontSize: 15,
-                    height: 1.55,
-                  ),
-                  children: [
-                    const TextSpan(text: 'Based on your '),
-                    TextSpan(
-                      text: '${health.score.toInt()} GoFaster Score',
-                      style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700),
-                    ),
-                    const TextSpan(text: ' and '),
-                    TextSpan(
-                      text: health.sleepDuration + ' sleep',
-                      style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700),
-                    ),
-                    const TextSpan(text: ', we recommend a HIIT session today to peak your performance.'),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-              Divider(color: Colors.white.withValues(alpha: 0.05), height: 1),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 26,
-                        height: 26,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Center(
-                          child: Text('AI',
-                            style: TextStyle(
-                              fontFamily: AppTextStyles.fontFamily,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 9,
-                            )),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Text('Updated 5m ago',
-                    style: AppTextStyles.label.copyWith(color: AppColors.textMuted, fontSize: 10)),
-                ],
+              Text('Analysing sleep, score & preferences',
+                style: AppTextStyles.bodySm,
               ),
             ],
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────
-//  Category Chips
-// ─────────────────────────────────────────────────────
-class _CategoryChips extends StatelessWidget {
-  final List<WorkoutCategory> categories;
-  final int selectedIndex;
-  final ValueChanged<int> onSelected;
+// ── AI Plan Card ──────────────────────────────────────────────────────────────
+class _AiPlanCard extends StatefulWidget {
+  final WorkoutPlan plan;
+  const _AiPlanCard({required this.plan});
 
-  const _CategoryChips({
-    required this.categories,
-    required this.selectedIndex,
-    required this.onSelected,
-  });
+  @override
+  State<_AiPlanCard> createState() => _AiPlanCardState();
+}
+
+class _AiPlanCardState extends State<_AiPlanCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.plan;
+    final intensityColor = _intensityColor(p.intensity);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.cardBg,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.35)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.accent.withValues(alpha: 0.10),
+            blurRadius: 20, spreadRadius: -4,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.auto_awesome_rounded, color: AppColors.accent, size: 16),
+                    const SizedBox(width: 6),
+                    Text('Claude AI Plan', style: AppTextStyles.label.copyWith(color: AppColors.accent)),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: intensityColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(50),
+                      ),
+                      child: Text(p.intensity,
+                        style: AppTextStyles.label.copyWith(color: intensityColor),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(p.title, style: AppTextStyles.h4),
+                const SizedBox(height: 4),
+                Text(p.description, style: AppTextStyles.bodySm),
+                const SizedBox(height: 12),
+                // Stats row
+                Row(children: [
+                  _PlanStat(Icons.timer_rounded, '${p.durationMinutes} min'),
+                  const SizedBox(width: 16),
+                  _PlanStat(Icons.local_fire_department_rounded,
+                    '~${p.estimatedCalories} kcal', color: AppColors.primary),
+                  const SizedBox(width: 16),
+                  _PlanStat(Icons.fitness_center_rounded,
+                    '${p.sets.length} exercises'),
+                ]),
+                const SizedBox(height: 12),
+                // AI Insight
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.insights_rounded, color: AppColors.accent, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(p.aiInsight, style: AppTextStyles.bodySm.copyWith(height: 1.4))),
+                  ]),
+                ),
+              ],
+            ),
+          ),
+
+          // Exercises list (collapsible)
+          GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('View ${p.sets.length} Exercises',
+                    style: AppTextStyles.h5.copyWith(color: AppColors.primary),
+                  ),
+                  AnimatedRotation(
+                    turns: _expanded ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(Icons.keyboard_arrow_down_rounded,
+                      color: AppColors.primary, size: 22),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          if (_expanded) ...[
+            const Divider(height: 1, color: AppColors.border),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  _WarmupCooldown(icon: Icons.wb_sunny_outlined, label: 'Warm-Up', text: p.warmup),
+                  const SizedBox(height: 8),
+                  ...p.sets.asMap().entries.map((e) => _ExerciseSetRow(set: e.value, index: e.key + 1)),
+                  const SizedBox(height: 8),
+                  _WarmupCooldown(icon: Icons.ac_unit_rounded, label: 'Cool-Down', text: p.cooldown),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        backgroundColor: AppColors.success,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        content: Text('Workout started! Stay hydrated and go faster! 💪',
+                          style: AppTextStyles.bodySm.copyWith(color: Colors.white),
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: Text('Start Workout', style: AppTextStyles.button),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Color _intensityColor(String i) {
+    switch (i) {
+      case 'Low':       return AppColors.success;
+      case 'Moderate':  return AppColors.accent;
+      case 'High':      return AppColors.primary;
+      case 'Very High': return AppColors.error;
+      default:          return AppColors.accent;
+    }
+  }
+}
+
+class _PlanStat extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  const _PlanStat(this.icon, this.label, {this.color = AppColors.textSecondary});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, color: color, size: 14),
+      const SizedBox(width: 4),
+      Text(label, style: AppTextStyles.bodySm.copyWith(color: color)),
+    ]);
+  }
+}
+
+class _WarmupCooldown extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String text;
+  const _WarmupCooldown({required this.icon, required this.label, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(children: [
+        Icon(icon, color: AppColors.textMuted, size: 16),
+        const SizedBox(width: 8),
+        Expanded(
+          child: RichText(
+            text: TextSpan(
+              style: AppTextStyles.bodySm,
+              children: [
+                TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w600)),
+                TextSpan(text: text),
+              ],
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _ExerciseSetRow extends StatelessWidget {
+  final WorkoutSet set;
+  final int index;
+  const _ExerciseSetRow({required this.set, required this.index});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(children: [
+        Container(
+          width: 28, height: 28,
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text('$index', style: AppTextStyles.label.copyWith(color: AppColors.primary)),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(set.exercise, style: AppTextStyles.h5),
+              Text(set.muscleGroup, style: AppTextStyles.label.copyWith(color: AppColors.textMuted)),
+            ],
+          ),
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text('${set.sets} × ${set.reps}',
+              style: AppTextStyles.bodySm.copyWith(
+                color: AppColors.primary, fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text('Rest: ${set.rest}', style: AppTextStyles.label),
+          ],
+        ),
+      ]),
+    );
+  }
+}
+
+// ── Category Chips ────────────────────────────────────────────────────────────
+class _CategoryChips extends StatelessWidget {
+  final List<String> categories;
+  final int selected;
+  final ValueChanged<int> onSelect;
+  const _CategoryChips({required this.categories, required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 40,
-      child: ListView.separated(
+      child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: categories.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final selected = i == selectedIndex;
-          return GestureDetector(
-            onTap: () => onSelected(i),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected ? AppColors.primary : Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: selected
-                      ? AppColors.primary
-                      : Colors.white.withValues(alpha: 0.1),
+        itemBuilder: (ctx, i) {
+          final active = i == selected;
+          return Padding(
+            padding: EdgeInsets.only(right: i == categories.length - 1 ? 0 : 8),
+            child: GestureDetector(
+              onTap: () => onSelect(i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                decoration: BoxDecoration(
+                  gradient: active ? AppGradients.fire : null,
+                  color: active ? null : AppColors.surface,
+                  borderRadius: BorderRadius.circular(50),
+                  border: Border.all(
+                    color: active ? Colors.transparent : AppColors.border,
+                  ),
                 ),
-                boxShadow: selected
-                    ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.35), blurRadius: 12)]
-                    : null,
+                child: Center(
+                  child: Text(
+                    categories[i],
+                    style: AppTextStyles.buttonSm.copyWith(
+                      color: active ? Colors.white : AppColors.textSecondary,
+                    ),
+                  ),
+                ),
               ),
-              child: Text(categories[i].name,
-                style: TextStyle(
-                  fontFamily: AppTextStyles.fontFamily,
-                  color: selected ? Colors.white : AppColors.textMuted,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                )),
             ),
           );
         },
@@ -368,138 +603,121 @@ class _CategoryChips extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────
-//  Workout Cards List
-// ─────────────────────────────────────────────────────
-class _WorkoutCardsList extends StatelessWidget {
-  final List<WorkoutCard> cards;
-  const _WorkoutCardsList({required this.cards});
+// ── Exercise List from ExerciseDB ─────────────────────────────────────────────
+class _ExerciseList extends StatelessWidget {
+  final List<ExerciseItem> exercises;
+  final bool loading;
+  const _ExerciseList({required this.exercises, required this.loading});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('RECOMMENDED FOR YOU',
-          style: AppTextStyles.label.copyWith(color: AppColors.textMuted, letterSpacing: 1.5)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const SectionHeader(title: 'Exercise Library'),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(50),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Text('ExerciseDB',
+                style: AppTextStyles.label.copyWith(color: AppColors.textMuted),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 14),
-        ...cards.asMap().entries.map((e) {
-          final card = e.value;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: _WorkoutCardTile(card: card),
-          );
-        }),
+        if (loading)
+          const Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))
+        else if (exercises.isEmpty)
+          Text('No exercises found.', style: AppTextStyles.bodySm)
+        else
+          ...exercises.map((e) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _ExerciseCard(exercise: e),
+          )),
       ],
     );
   }
 }
 
-class _WorkoutCardTile extends StatelessWidget {
-  final WorkoutCard card;
-  const _WorkoutCardTile({required this.card});
+class _ExerciseCard extends StatelessWidget {
+  final ExerciseItem exercise;
+  const _ExerciseCard({required this.exercise});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: card.isLarge ? 220 : 130,
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: card.gradientColors,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        color: AppColors.cardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
       ),
-      child: Stack(
+      child: Row(
         children: [
-          // Gradient overlay
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black.withValues(alpha: 0.7)],
+          // Placeholder for GIF
+          Container(
+            width: 64, height: 64,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: exercise.gifUrl.isNotEmpty
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.network(exercise.gifUrl, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                        const Icon(Icons.fitness_center_rounded, color: AppColors.primary, size: 28),
+                    ),
+                  )
+                : const Icon(Icons.fitness_center_rounded, color: AppColors.primary, size: 28),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(exercise.name, style: AppTextStyles.h5),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    _Tag(exercise.target, AppColors.primary),
+                    _Tag(exercise.bodyPart, AppColors.textMuted),
+                    _Tag(exercise.equipment, AppColors.textMuted),
+                  ],
                 ),
-                borderRadius: BorderRadius.circular(22),
-              ),
+              ],
             ),
           ),
-
-          // Decorative glow
-          Positioned(
-            top: -30,
-            right: -30,
+          GestureDetector(
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  backgroundColor: AppColors.cardBg,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  content: Text('Added ${exercise.name} to today\'s workout! 💪',
+                    style: AppTextStyles.bodySm,
+                  ),
+                ),
+              );
+            },
             child: Container(
-              width: 120,
-              height: 120,
+              width: 36, height: 36,
               decoration: BoxDecoration(
+                gradient: AppGradients.fire,
                 shape: BoxShape.circle,
-                gradient: RadialGradient(colors: [
-                  AppColors.primary.withValues(alpha: 0.2),
-                  Colors.transparent,
-                ]),
               ),
+              child: const Icon(Icons.add_rounded, color: Colors.white, size: 20),
             ),
           ),
-
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      _Tag(card.level, Colors.white.withValues(alpha: 0.2)),
-                      const SizedBox(width: 8),
-                      _Tag(card.tag, AppColors.primary.withValues(alpha: 0.4), textColor: AppColors.primary),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(card.title,
-                    style: card.isLarge
-                        ? AppTextStyles.headingXL.copyWith(fontSize: 28)
-                        : AppTextStyles.headingLg),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Icon(Icons.schedule_rounded, color: Colors.white60, size: 14),
-                      const SizedBox(width: 4),
-                      Text('${card.duration} min',
-                        style: AppTextStyles.body.copyWith(color: Colors.white70, fontSize: 12)),
-                      const SizedBox(width: 16),
-                      const Icon(Icons.local_fire_department_rounded, color: Colors.white60, size: 14),
-                      const SizedBox(width: 4),
-                      Text('${card.calories} kcal',
-                        style: AppTextStyles.body.copyWith(color: Colors.white70, fontSize: 12)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          if (!card.isLarge)
-            Positioned(
-              right: 14,
-              bottom: 14,
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                ),
-                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 22),
-              ),
-            ),
         ],
       ),
     );
@@ -507,27 +725,19 @@ class _WorkoutCardTile extends StatelessWidget {
 }
 
 class _Tag extends StatelessWidget {
-  final String label;
-  final Color bg;
-  final Color? textColor;
-  const _Tag(this.label, this.bg, {this.textColor});
+  final String text;
+  final Color color;
+  const _Tag(this.text, this.color);
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(8),
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(50),
       ),
-      child: Text(label,
-        style: TextStyle(
-          fontFamily: AppTextStyles.fontFamily,
-          color: textColor ?? Colors.white.withValues(alpha: 0.8),
-          fontWeight: FontWeight.w700,
-          fontSize: 9,
-          letterSpacing: 0.5,
-        )),
+      child: Text(text, style: AppTextStyles.label.copyWith(color: color, fontSize: 9)),
     );
   }
 }

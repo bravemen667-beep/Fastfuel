@@ -1,259 +1,289 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-// ═══════════════════════════════════════════════════════
-//  GoFaster Design System — Colors
-// ═══════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────
+//  GoFaster Health – Brand Color System
+//  Exact palette from gofaster.in
+// ─────────────────────────────────────────────────────────
 class AppColors {
-  // Primary
-  static const Color primary = Color(0xFF850AFF);
-  static const Color primaryLight = Color(0xFFAB5CFF);
-  static const Color primaryDark = Color(0xFF5A00CC);
+  AppColors._();
 
-  // Neon accents
-  static const Color neonBlue = Color(0xFF00D4FF);
-  static const Color neonGreen = Color(0xFF00FF94);
-  static const Color neonGreenAlt = Color(0xFFCCFF00);
-  static const Color neonOrange = Color(0xFFFF8A00);
+  // Core brand
+  static const Color primary       = Color(0xFFFF6B00); // Vibrant orange
+  static const Color primaryLight  = Color(0xFFFFB347); // Light orange / accent
+  static const Color primaryDark   = Color(0xFFCC5500); // Dark orange
+  static const Color accent        = Color(0xFFFFB347); // Gradient / hover
 
   // Backgrounds
-  static const Color bgDark = Color(0xFF0A0A0C);
-  static const Color bgDarkAlt = Color(0xFF0E0814);
-  static const Color bgDarkDeep = Color(0xFF050505);
-  static const Color surfaceDark = Color(0xFF190F23);
-  static const Color cardDark = Color(0xFF14091F);
-
-  // Semantic
-  static const Color accentBlue = Color(0xFF0A84FF);
-  static const Color accentGreen = Color(0xFF32D74B);
-  static const Color amber = Color(0xFFF59E0B);
-  static const Color error = Color(0xFFFF453A);
-  static const Color indigo = Color(0xFF5B6CF9);
+  static const Color background    = Color(0xFF0D0D0D); // Deep black
+  static const Color bgAlt         = Color(0xFF111111); // Slightly lighter
+  static const Color secondary     = Color(0xFF1A1A1A); // Near-black cards/bg
+  static const Color cardBg        = Color(0xFF1E1E1E); // Card background
+  static const Color surface       = Color(0xFF252525); // Surface / elevated card
+  static const Color surfaceHigh   = Color(0xFF2C2C2C); // Chip / pill bg
 
   // Text
-  static const Color textPrimary = Color(0xFFF1F0F5);
-  static const Color textSecondary = Color(0xFF94A3B8);
-  static const Color textMuted = Color(0xFF475569);
+  static const Color textPrimary   = Color(0xFFFFFFFF);
+  static const Color textSecondary = Color(0xFFCCCCCC);
+  static const Color textMuted     = Color(0xFF888888);
+  static const Color textDisabled  = Color(0xFF555555);
 
-  // Glass
-  static Color glassWhite = Colors.white.withValues(alpha: 0.05);
-  static Color glassBorder = Colors.white.withValues(alpha: 0.1);
-  static Color glassPurple = const Color(0xFF850AFF).withValues(alpha: 0.05);
-  static Color glassPurpleBorder = const Color(0xFF850AFF).withValues(alpha: 0.1);
+  // Semantic
+  static const Color success       = Color(0xFF4CAF50);
+  static const Color successLight  = Color(0xFF81C784);
+  static const Color error         = Color(0xFFFF4444);
+  static const Color errorLight    = Color(0xFFFF7070);
+  static const Color warning       = Color(0xFFFFC107);
+  static const Color info          = Color(0xFF2196F3);
+
+  // Divider / border
+  static const Color border        = Color(0xFF2A2A2A);
+  static const Color borderLight   = Color(0xFF333333);
+
+  // Sleep stages
+  static const Color sleepRem      = Color(0xFFFF6B00);
+  static const Color sleepCore     = Color(0xFFFFB347);
+  static const Color sleepDeep     = Color(0xFFCC5500);
+  static const Color sleepAwake    = Color(0xFF888888);
 }
 
-// ═══════════════════════════════════════════════════════
-//  GoFaster Design System — Typography
-// ═══════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────
+//  Typography
+// ─────────────────────────────────────────────────────────
 class AppTextStyles {
-  static const String fontFamily = 'Poppins';
+  AppTextStyles._();
 
-  static const TextStyle displayLarge = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 56,
-    fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary,
-    letterSpacing: -2,
+  static TextStyle get display => GoogleFonts.poppins(
+    fontSize: 52, fontWeight: FontWeight.w800, color: AppColors.textPrimary, height: 1.1,
   );
-
-  static const TextStyle displayMedium = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 40,
-    fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary,
-    letterSpacing: -1.5,
+  static TextStyle get h1 => GoogleFonts.poppins(
+    fontSize: 32, fontWeight: FontWeight.w800, color: AppColors.textPrimary, height: 1.2,
   );
-
-  static const TextStyle headingXL = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 28,
-    fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary,
-    letterSpacing: -0.5,
+  static TextStyle get h2 => GoogleFonts.poppins(
+    fontSize: 24, fontWeight: FontWeight.w700, color: AppColors.textPrimary, height: 1.25,
   );
-
-  static const TextStyle headingLg = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 22,
-    fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary,
+  static TextStyle get h3 => GoogleFonts.poppins(
+    fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary,
   );
-
-  static const TextStyle headingMd = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 18,
-    fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary,
+  static TextStyle get h4 => GoogleFonts.poppins(
+    fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.textPrimary,
   );
-
-  static const TextStyle headingSm = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 16,
-    fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary,
+  static TextStyle get h5 => GoogleFonts.poppins(
+    fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary,
   );
-
-  static const TextStyle body = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 14,
-    fontWeight: FontWeight.w400,
-    color: AppColors.textSecondary,
+  static TextStyle get body => GoogleFonts.poppins(
+    fontSize: 14, fontWeight: FontWeight.w400, color: AppColors.textPrimary,
   );
-
-  static const TextStyle bodyMedium = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 14,
-    fontWeight: FontWeight.w500,
-    color: AppColors.textPrimary,
+  static TextStyle get bodySm => GoogleFonts.poppins(
+    fontSize: 13, fontWeight: FontWeight.w400, color: AppColors.textSecondary,
   );
-
-  static const TextStyle caption = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 11,
-    fontWeight: FontWeight.w600,
-    color: AppColors.textMuted,
-    letterSpacing: 0.8,
+  static TextStyle get caption => GoogleFonts.poppins(
+    fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary, letterSpacing: 0.5,
   );
-
-  static const TextStyle label = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 10,
-    fontWeight: FontWeight.w700,
-    color: AppColors.textMuted,
-    letterSpacing: 1.2,
+  static TextStyle get label => GoogleFonts.poppins(
+    fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 1.0,
   );
-
-  static const TextStyle scoreHuge = TextStyle(
-    fontFamily: fontFamily,
-    fontSize: 80,
-    fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary,
-    letterSpacing: -4,
+  static TextStyle get scoreHuge => GoogleFonts.poppins(
+    fontSize: 72, fontWeight: FontWeight.w900, color: AppColors.textPrimary, height: 1.0,
+  );
+  static TextStyle get scoreLg => GoogleFonts.poppins(
+    fontSize: 44, fontWeight: FontWeight.w800, color: AppColors.textPrimary, height: 1.0,
+  );
+  static TextStyle get button => GoogleFonts.poppins(
+    fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary, letterSpacing: 0.3,
+  );
+  static TextStyle get buttonSm => GoogleFonts.poppins(
+    fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary,
+  );
+  static TextStyle get tag => GoogleFonts.poppins(
+    fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8,
   );
 }
 
-// ═══════════════════════════════════════════════════════
-//  GoFaster Design System — Theme
-// ═══════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────
+//  Gradients
+// ─────────────────────────────────────────────────────────
+class AppGradients {
+  AppGradients._();
+
+  static const LinearGradient primary = LinearGradient(
+    colors: [AppColors.primary, AppColors.accent],
+    begin: Alignment.centerLeft, end: Alignment.centerRight,
+  );
+  static const LinearGradient primaryVertical = LinearGradient(
+    colors: [AppColors.primary, AppColors.primaryDark],
+    begin: Alignment.topCenter, end: Alignment.bottomCenter,
+  );
+  static const LinearGradient fire = LinearGradient(
+    colors: [Color(0xFFFF6B00), Color(0xFFFF8C42), Color(0xFFFFB347)],
+    begin: Alignment.topLeft, end: Alignment.bottomRight,
+  );
+  static const LinearGradient orangeGlow = LinearGradient(
+    colors: [Color(0xFFFF6B00), Color(0xFFFF4500)],
+    begin: Alignment.topLeft, end: Alignment.bottomRight,
+  );
+  static const LinearGradient darkCard = LinearGradient(
+    colors: [Color(0xFF1E1E1E), Color(0xFF252525)],
+    begin: Alignment.topLeft, end: Alignment.bottomRight,
+  );
+  static const LinearGradient scoreRing = LinearGradient(
+    colors: [AppColors.primary, AppColors.accent, AppColors.primaryLight],
+    begin: Alignment.topCenter, end: Alignment.bottomCenter,
+  );
+  static const RadialGradient orangeRadial = RadialGradient(
+    colors: [Color(0x33FF6B00), Color(0x00FF6B00)],
+    radius: 1.0,
+  );
+  static LinearGradient get background => const LinearGradient(
+    colors: [Color(0xFF0D0D0D), Color(0xFF111111)],
+    begin: Alignment.topCenter, end: Alignment.bottomCenter,
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+//  Decoration helpers
+// ─────────────────────────────────────────────────────────
+BoxDecoration cardDecoration({
+  double radius = 20,
+  Color? color,
+  bool hasGlow = false,
+}) {
+  return BoxDecoration(
+    color: color ?? AppColors.cardBg,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: AppColors.border, width: 1),
+    boxShadow: hasGlow
+        ? [
+            BoxShadow(
+              color: AppColors.primary.withValues(alpha: 0.20),
+              blurRadius: 20, spreadRadius: -2,
+            )
+          ]
+        : [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.30),
+              blurRadius: 10, offset: const Offset(0, 4),
+            )
+          ],
+  );
+}
+
+BoxDecoration primaryCardDecoration({double radius = 20}) {
+  return BoxDecoration(
+    gradient: AppGradients.fire,
+    borderRadius: BorderRadius.circular(radius),
+    boxShadow: [
+      BoxShadow(
+        color: AppColors.primary.withValues(alpha: 0.35),
+        blurRadius: 20, spreadRadius: -2, offset: const Offset(0, 6),
+      )
+    ],
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+//  Theme
+// ─────────────────────────────────────────────────────────
 class AppTheme {
+  AppTheme._();
+
   static ThemeData get darkTheme {
     return ThemeData(
       brightness: Brightness.dark,
       useMaterial3: true,
-      scaffoldBackgroundColor: AppColors.bgDark,
+      scaffoldBackgroundColor: AppColors.background,
+      fontFamily: GoogleFonts.poppins().fontFamily,
+
       colorScheme: const ColorScheme.dark(
         primary: AppColors.primary,
-        secondary: AppColors.neonBlue,
-        surface: AppColors.surfaceDark,
+        secondary: AppColors.accent,
+        surface: AppColors.cardBg,
         error: AppColors.error,
+        onPrimary: Colors.white,
+        onSecondary: Colors.white,
+        onSurface: AppColors.textPrimary,
+        onError: Colors.white,
       ),
-      fontFamily: AppTextStyles.fontFamily,
-      appBarTheme: const AppBarTheme(
+
+      appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        systemOverlayStyle: SystemUiOverlayStyle.light,
-        titleTextStyle: TextStyle(
-          fontFamily: AppTextStyles.fontFamily,
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
+        iconTheme: const IconThemeData(color: AppColors.textPrimary),
+        titleTextStyle: AppTextStyles.h4,
+        surfaceTintColor: Colors.transparent,
       ),
+
       cardTheme: CardThemeData(
-        color: AppColors.surfaceDark,
+        color: AppColors.cardBg,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: AppColors.glassBorder),
+          side: const BorderSide(color: AppColors.border, width: 1),
         ),
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Colors.transparent,
-        selectedItemColor: AppColors.primary,
-        unselectedItemColor: AppColors.textMuted,
-      ),
+
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
-          shape: const StadiumBorder(),
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-          textStyle: const TextStyle(
-            fontFamily: AppTextStyles.fontFamily,
-            fontWeight: FontWeight.w700,
-            fontSize: 16,
-          ),
+          textStyle: AppTextStyles.button,
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+          elevation: 0,
         ),
+      ),
+
+      iconTheme: const IconThemeData(color: AppColors.textPrimary, size: 24),
+
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: AppColors.secondary,
+        selectedItemColor: AppColors.primary,
+        unselectedItemColor: AppColors.textMuted,
+        selectedLabelStyle: AppTextStyles.caption,
+        unselectedLabelStyle: AppTextStyles.caption,
+        type: BottomNavigationBarType.fixed,
+        elevation: 0,
+      ),
+
+      chipTheme: ChipThemeData(
+        backgroundColor: AppColors.surface,
+        labelStyle: AppTextStyles.caption.copyWith(color: AppColors.textSecondary),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+        side: const BorderSide(color: AppColors.border),
+      ),
+
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? AppColors.primary : AppColors.textMuted,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected)
+              ? AppColors.primary.withValues(alpha: 0.35)
+              : AppColors.surfaceHigh,
+        ),
+      ),
+
+      dividerTheme: const DividerThemeData(color: AppColors.border, thickness: 1),
+
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: AppColors.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+        ),
+        hintStyle: AppTextStyles.body.copyWith(color: AppColors.textMuted),
+        labelStyle: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
       ),
     );
   }
-}
-
-// ═══════════════════════════════════════════════════════
-//  Gradient Helpers
-// ═══════════════════════════════════════════════════════
-class AppGradients {
-  static const LinearGradient primaryGradient = LinearGradient(
-    colors: [AppColors.primary, AppColors.neonBlue],
-    begin: Alignment.centerLeft,
-    end: Alignment.centerRight,
-  );
-
-  static const LinearGradient primaryVertical = LinearGradient(
-    colors: [AppColors.primary, AppColors.neonBlue],
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-  );
-
-  static const LinearGradient actionGradient = LinearGradient(
-    colors: [Color(0xFF00D2FF), Color(0xFF3A7BD5), Color(0xFF00FF88)],
-    stops: [0, 0.5, 1],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  static const RadialGradient purpleGlow = RadialGradient(
-    colors: [Color(0x26850AFF), Colors.transparent],
-    radius: 0.8,
-  );
-
-  static LinearGradient glassCard = LinearGradient(
-    colors: [
-      Colors.white.withValues(alpha: 0.08),
-      Colors.white.withValues(alpha: 0.02),
-    ],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-}
-
-// ═══════════════════════════════════════════════════════
-//  Glass Decoration Helper
-// ═══════════════════════════════════════════════════════
-BoxDecoration glassDecoration({
-  double borderRadius = 20,
-  Color? borderColor,
-  Color? background,
-  List<BoxShadow>? shadows,
-}) {
-  return BoxDecoration(
-    color: background ?? Colors.white.withValues(alpha: 0.04),
-    borderRadius: BorderRadius.circular(borderRadius),
-    border: Border.all(
-      color: borderColor ?? Colors.white.withValues(alpha: 0.1),
-      width: 1,
-    ),
-    boxShadow: shadows,
-  );
-}
-
-BoxDecoration primaryGlassDecoration({double borderRadius = 20}) {
-  return BoxDecoration(
-    color: AppColors.primary.withValues(alpha: 0.08),
-    borderRadius: BorderRadius.circular(borderRadius),
-    border: Border.all(
-      color: AppColors.primary.withValues(alpha: 0.2),
-      width: 1,
-    ),
-  );
 }

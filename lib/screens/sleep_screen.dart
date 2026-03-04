@@ -1,278 +1,413 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:provider/provider.dart';
-import '../theme/app_theme.dart';
-import '../widgets/common_widgets.dart';
-import '../providers/health_provider.dart';
-import 'dart:math' as math;
+// ─────────────────────────────────────────────────────────────────────────────
+//  GoFaster Health — Sleep Analysis Screen
+//
+//  On first open:
+//    1. Checks if Health Connect / HealthKit permission is already granted.
+//    2. If not → shows PermissionGateScreen overlay.
+//    3. If granted (or after grant) → auto-syncs real sleep data.
+//    4. Shows "Synced X min ago" badge when real data is live.
+//    5. If denied → falls back to Firestore / manual data silently.
+// ─────────────────────────────────────────────────────────────────────────────
 
-class SleepScreen extends StatelessWidget {
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../theme/app_theme.dart';
+import '../providers/health_provider.dart';
+import '../services/health_sync_service.dart';
+import '../services/claude_health_tips_service.dart';
+import '../widgets/common_widgets.dart';
+import 'permission_gate_screen.dart';
+
+class SleepScreen extends StatefulWidget {
   const SleepScreen({super.key});
 
   @override
+  State<SleepScreen> createState() => _SleepScreenState();
+}
+
+class _SleepScreenState extends State<SleepScreen> {
+  static const _prefKey = 'sleep_health_asked';
+  bool _gateChecked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Defer permission check until after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkPermission());
+  }
+
+  Future<void> _checkPermission() async {
+    if (!mounted) return;
+    final hp = context.read<HealthProvider>();
+
+    // ── 1. Already granted? Sync immediately ──────────────────────────────
+    final status = await hp.checkHealthPermission();
+    if (status == HealthPermissionStatus.granted) {
+      await hp.refreshHealthData();
+      if (mounted) setState(() => _gateChecked = true);
+      return;
+    }
+
+    // ── 2. Web / unsupported → skip gate ────────────────────────────────
+    if (kIsWeb || status == HealthPermissionStatus.notAvailable) {
+      if (mounted) setState(() => _gateChecked = true);
+      return;
+    }
+
+    // ── 3. First time? Show gate ─────────────────────────────────────────
+    final prefs = await SharedPreferences.getInstance();
+    final alreadyAsked = prefs.getBool(_prefKey) ?? false;
+    if (!alreadyAsked && mounted) {
+      await prefs.setBool(_prefKey, true);
+      if (!mounted) return;
+      final granted = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const PermissionGateScreen(context: 'sleep'),
+        ),
+      );
+      if ((granted ?? false) && mounted) {
+        await hp.refreshHealthData();
+      }
+    }
+
+    if (mounted) setState(() => _gateChecked = true);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final health = context.watch<HealthProvider>();
+    final hp = context.watch<HealthProvider>();
+
+    if (hp.isLoading || !_gateChecked) {
+      return const Scaffold(
+        backgroundColor: AppColors.background,
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Color(0xFF9C27B0), strokeWidth: 2,
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: AppColors.bgDarkDeep,
-      body: Stack(
-        children: [
-          // Deep space gradient
-          Container(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: const Alignment(0.5, -0.5),
-                radius: 1.2,
-                colors: [
-                  const Color(0xFF1a0033).withValues(alpha: 0.8),
-                  AppColors.bgDarkDeep,
-                ],
+      backgroundColor: AppColors.background,
+      body: RefreshIndicator(
+        color: const Color(0xFF9C27B0),
+        backgroundColor: AppColors.cardBg,
+        onRefresh: () async {
+          final status = await hp.checkHealthPermission();
+          if (status == HealthPermissionStatus.granted) {
+            await hp.refreshHealthData();
+          }
+        },
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          slivers: [
+            _header(hp),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  // ── Sync status banner ──────────────────────────────────
+                  _SyncBanner(hp: hp).animate().fade(duration: 400.ms),
+                  if (hp.syncLabel.isNotEmpty) const SizedBox(height: 12),
+
+                  _SleepScoreCard(hp: hp).animate().fade(duration: 500.ms),
+                  const SizedBox(height: 20),
+                  _SleepTimesCard(hp: hp)
+                      .animate(delay: 100.ms).fade(duration: 500.ms),
+                  const SizedBox(height: 20),
+                  _SleepStagesCard(hp: hp)
+                      .animate(delay: 150.ms).fade(duration: 500.ms),
+                  const SizedBox(height: 20),
+                  _WeeklyTrend(hp: hp)
+                      .animate(delay: 200.ms).fade(duration: 500.ms),
+                  const SizedBox(height: 20),
+                  _SleepTip().animate(delay: 250.ms).fade(duration: 500.ms),
+                ]),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  SliverAppBar _header(HealthProvider hp) {
+    return SliverAppBar(
+      pinned: true,
+      floating: false,
+      snap: false,
+      automaticallyImplyLeading: false,
+      toolbarHeight: 56,
+      expandedHeight: 56,
+      backgroundColor: AppColors.background,
+      surfaceTintColor: Colors.transparent,
+      flexibleSpace: FlexibleSpaceBar(
+        background: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.background,
+            border: Border(bottom: BorderSide(color: AppColors.border, width: 0.5)),
+          ),
+          child: SafeArea(
+            bottom: false,
+            child: SizedBox(
+              height: 56,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Sleep Analysis', style: AppTextStyles.h3),
+                    hp.syncLabel.isNotEmpty
+                        ? _SyncChip(label: hp.syncLabel)
+                        : GFTag(label: 'Last Night', color: const Color(0xFF9C27B0)),
+                  ],
+                ),
               ),
             ),
           ),
-          GlowBlob(color: AppColors.primary, size: 300, alignment: const Alignment(0.7, -0.7), opacity: 0.12),
-          GlowBlob(color: AppColors.indigo, size: 250, alignment: const Alignment(-0.6, 0.6), opacity: 0.08),
-
-          SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                // ── Sticky Header ────────────────────────
-                Container(
-                  color: Colors.transparent,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: glassDecoration(borderRadius: 14, borderColor: AppColors.primary.withValues(alpha: 0.2)),
-                          child: const Icon(Icons.calendar_today_rounded, color: AppColors.textPrimary, size: 18),
-                        ),
-                        Column(
-                          children: [
-                            Text('Sleep Analysis', style: AppTextStyles.headingSm),
-                            Text('SYNCED WITH HEALTHKIT • 2M AGO',
-                              style: AppTextStyles.label.copyWith(
-                                color: AppColors.primary,
-                                fontSize: 8,
-                                letterSpacing: 1,
-                              )),
-                          ],
-                        ),
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: glassDecoration(borderRadius: 14, borderColor: AppColors.primary.withValues(alpha: 0.2)),
-                          child: const Icon(Icons.insights_rounded, color: AppColors.primary, size: 18),
-                        ),
-                      ],
-                    ).animate().fadeIn(duration: 400.ms),
-                  ),
-                ),
-
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 8),
-                        _SleepScoreRing(health: health).animate().fadeIn(delay: 100.ms, duration: 600.ms),
-                        const SizedBox(height: 20),
-                        _GoFasterInsight().animate().fadeIn(delay: 200.ms, duration: 500.ms),
-                        const SizedBox(height: 16),
-                        _BedtimeWakeRow(health: health).animate().fadeIn(delay: 300.ms, duration: 500.ms),
-                        const SizedBox(height: 16),
-                        _SleepStagesChart(health: health).animate().fadeIn(delay: 400.ms, duration: 500.ms),
-                        const SizedBox(height: 16),
-                        _WeeklyTrend(health: health).animate().fadeIn(delay: 500.ms, duration: 500.ms),
-                        const SizedBox(height: 110),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────
-//  Sleep Score Ring
-// ─────────────────────────────────────────────────────
-class _SleepScoreRing extends StatelessWidget {
-  final HealthProvider health;
-  const _SleepScoreRing({required this.health});
+// ── Sync Status Banner ────────────────────────────────────────────────────────
+class _SyncBanner extends StatelessWidget {
+  final HealthProvider hp;
+  const _SyncBanner({required this.hp});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SizedBox(
-          width: 180,
-          height: 180,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              CustomPaint(
-                size: const Size(180, 180),
-                painter: _GradientRingPainter(
-                  progress: health.sleepProgress,
-                  colors: [AppColors.primary, AppColors.accentBlue],
-                ),
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    health.sleepScore.toInt().toString(),
-                    style: AppTextStyles.scoreHuge.copyWith(fontSize: 52),
-                  ),
-                  Text('SCORE',
-                    style: AppTextStyles.label.copyWith(color: AppColors.textMuted, letterSpacing: 2)),
-                ],
-              ),
-            ],
-          ),
+    // Syncing spinner
+    if (hp.healthSyncing) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF9C27B0).withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF9C27B0).withValues(alpha: 0.25)),
         ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Row(
           children: [
-            NeonBadge(label: 'Good Quality', color: AppColors.primary),
-            const SizedBox(width: 10),
-            NeonBadge(label: '+5% vs Last Week', color: AppColors.accentGreen, textColor: AppColors.accentGreen),
+            const SizedBox(
+              width: 16, height: 16,
+              child: CircularProgressIndicator(
+                color: Color(0xFF9C27B0), strokeWidth: 2,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Syncing from ${hp.healthSource.isEmpty ? "Health" : hp.healthSource}…',
+              style: AppTextStyles.bodySm.copyWith(color: const Color(0xFFBA68C8)),
+            ),
           ],
         ),
-      ],
-    );
+      );
+    }
+
+    // Error banner
+    if (hp.healthSyncError != null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.error.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.error.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 16),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Health sync unavailable — showing saved data',
+                style: AppTextStyles.bodySm.copyWith(color: AppColors.error),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Synced successfully
+    if (hp.syncLabel.isNotEmpty && hp.healthSource.isNotEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.success.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.success.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 16),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '${hp.syncLabel} from ${hp.healthSource} · Pull to refresh',
+                style: AppTextStyles.bodySm.copyWith(color: AppColors.success),
+              ),
+            ),
+            const Icon(Icons.refresh_rounded, color: AppColors.success, size: 16),
+          ],
+        ),
+      );
+    }
+
+    // No banner needed
+    return const SizedBox.shrink();
   }
 }
 
-class _GradientRingPainter extends CustomPainter {
-  final double progress;
-  final List<Color> colors;
-
-  _GradientRingPainter({required this.progress, required this.colors});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = (size.width - 16) / 2;
-
-    // Track
-    canvas.drawCircle(center, radius, Paint()
-      ..color = Colors.white.withValues(alpha: 0.05)
-      ..strokeWidth = 10
-      ..style = PaintingStyle.stroke);
-
-    // Gradient glow
-    final sweepAngle = 2 * math.pi * progress;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-
-    // Glow layer
-    canvas.drawArc(rect, -math.pi / 2, sweepAngle, false,
-      Paint()
-        ..shader = SweepGradient(
-          startAngle: -math.pi / 2,
-          endAngle: -math.pi / 2 + sweepAngle,
-          colors: colors,
-          tileMode: TileMode.clamp,
-        ).createShader(rect)
-        ..strokeWidth = 18
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
-    );
-
-    // Sharp arc
-    canvas.drawArc(rect, -math.pi / 2, sweepAngle, false,
-      Paint()
-        ..shader = SweepGradient(
-          startAngle: -math.pi / 2,
-          endAngle: -math.pi / 2 + sweepAngle,
-          colors: colors,
-          tileMode: TileMode.clamp,
-        ).createShader(rect)
-        ..strokeWidth = 10
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_GradientRingPainter old) => old.progress != progress;
-}
-
-// ─────────────────────────────────────────────────────
-//  GoFaster Insight Banner
-// ─────────────────────────────────────────────────────
-class _GoFasterInsight extends StatelessWidget {
-  const _GoFasterInsight();
+// ── Sync chip (shown in header) ───────────────────────────────────────────────
+class _SyncChip extends StatelessWidget {
+  final String label;
+  const _SyncChip({required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+        color: AppColors.success.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(color: AppColors.success.withValues(alpha: 0.3)),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(10),
+            width: 6, height: 6,
+            decoration: const BoxDecoration(
+              color: AppColors.success,
+              shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 18),
           ),
-          const SizedBox(width: 14),
-          const Expanded(
+          const SizedBox(width: 5),
+          Text(label,
+            style: AppTextStyles.tag.copyWith(color: AppColors.success),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Sleep Score ─────────────────────────────────────────────────────────────
+class _SleepScoreCard extends StatelessWidget {
+  final HealthProvider hp;
+  const _SleepScoreCard({required this.hp});
+
+  String get _qualityLabel {
+    final s = hp.sleepScore;
+    if (s >= 85) return 'Excellent';
+    if (s >= 70) return 'Good Quality';
+    if (s >= 55) return 'Fair';
+    return 'Poor';
+  }
+
+  Color get _qualityColor {
+    final s = hp.sleepScore;
+    if (s >= 85) return AppColors.success;
+    if (s >= 70) return AppColors.success;
+    if (s >= 55) return AppColors.warning;
+    return AppColors.error;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppColors.cardBg,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF9C27B0).withValues(alpha: 0.12),
+            blurRadius: 25,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          GlowRing(
+            progress: hp.sleepProgress,
+            size: 120,
+            strokeWidth: 10,
+            gradientColors: const [Color(0xFF9C27B0), AppColors.primary],
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.bedtime_rounded, color: Color(0xFFBA68C8), size: 20),
+                Text(hp.sleepScore.toInt().toString(), style: AppTextStyles.h2),
+                Text('/ 100', style: AppTextStyles.label),
+              ],
+            ),
+          ),
+          const SizedBox(width: 24),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('GOFASTER INSIGHT',
-                  style: TextStyle(
-                    fontFamily: AppTextStyles.fontFamily,
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 10,
-                    letterSpacing: 1.5,
-                  )),
-                SizedBox(height: 6),
-                Text(
-                  'Low sleep = low energy. Your B12 tablet can help combat fatigue from reduced sleep cycles.',
-                  style: TextStyle(
-                    fontFamily: AppTextStyles.fontFamily,
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                    height: 1.5,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _qualityColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(50),
+                  ),
+                  child: Text(
+                    _qualityLabel,
+                    style: AppTextStyles.tag.copyWith(color: _qualityColor),
                   ),
                 ),
-                SizedBox(height: 8),
+                const SizedBox(height: 12),
+                Text('Sleep Duration', style: AppTextStyles.label),
+                const SizedBox(height: 4),
+                Text(
+                  hp.sleepDuration,
+                  style: AppTextStyles.h2.copyWith(color: AppColors.textPrimary),
+                ),
+                const SizedBox(height: 4),
                 Row(
                   children: [
-                    Text('LEARN MORE',
-                      style: TextStyle(
-                        fontFamily: AppTextStyles.fontFamily,
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 10,
-                        letterSpacing: 1,
-                      )),
-                    SizedBox(width: 4),
-                    Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary, size: 14),
+                    const Icon(Icons.trending_up_rounded,
+                      color: AppColors.success, size: 14),
+                    const SizedBox(width: 4),
+                    Text('+5% vs Last Week',
+                      style: AppTextStyles.label.copyWith(color: AppColors.success),
+                    ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                Text(
+                  'Efficiency: ${(hp.sleepEfficiency * 100).toInt()}%',
+                  style: AppTextStyles.caption.copyWith(color: const Color(0xFFBA68C8)),
+                ),
+                // Heart rate hint if synced
+                if (hp.heartRateBpm > 0) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.favorite_rounded,
+                        color: AppColors.error, size: 12),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Avg HR: ${hp.heartRateBpm.toInt()} bpm',
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.error,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -282,29 +417,27 @@ class _GoFasterInsight extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────
-//  Bedtime & Wake Row
-// ─────────────────────────────────────────────────────
-class _BedtimeWakeRow extends StatelessWidget {
-  final HealthProvider health;
-  const _BedtimeWakeRow({required this.health});
+// ─── Sleep Times ─────────────────────────────────────────────────────────────
+class _SleepTimesCard extends StatelessWidget {
+  final HealthProvider hp;
+  const _SleepTimesCard({required this.hp});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         Expanded(child: _TimeCard(
-          icon: Icons.bedtime_rounded,
-          iconColor: const Color(0xFF818CF8),
           label: 'Bedtime',
-          time: health.bedtime,
+          time: hp.bedtime,
+          icon: Icons.nightlight_round,
+          color: const Color(0xFF9C27B0),
         )),
         const SizedBox(width: 12),
         Expanded(child: _TimeCard(
+          label: 'Wake Up',
+          time: hp.wakeTime,
           icon: Icons.wb_sunny_rounded,
-          iconColor: const Color(0xFFFB923C),
-          label: 'Woke up',
-          time: health.wakeTime,
+          color: AppColors.accent,
         )),
       ],
     );
@@ -312,47 +445,114 @@ class _BedtimeWakeRow extends StatelessWidget {
 }
 
 class _TimeCard extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
   final String label;
   final String time;
+  final IconData icon;
+  final Color color;
 
   const _TimeCard({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-    required this.time,
+    required this.label, required this.time,
+    required this.icon, required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0x1A190F23),
+        color: AppColors.cardBg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.12)),
+        border: Border.all(color: AppColors.border),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 38, height: 38,
             decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: iconColor, size: 20),
+            child: Icon(icon, color: color, size: 20),
           ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label.toUpperCase(),
-                style: AppTextStyles.label.copyWith(color: AppColors.textMuted, fontSize: 9)),
-              const SizedBox(height: 3),
-              Text(time, style: AppTextStyles.headingSm.copyWith(fontSize: 16)),
-            ],
+          const SizedBox(height: 12),
+          Text(label, style: AppTextStyles.label),
+          const SizedBox(height: 4),
+          Text(time, style: AppTextStyles.h4.copyWith(color: color)),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Sleep Stages ─────────────────────────────────────────────────────────────
+class _SleepStagesCard extends StatelessWidget {
+  final HealthProvider hp;
+  const _SleepStagesCard({required this.hp});
+
+  static const _stageLabels = [
+    _StageLabel('REM',   AppColors.sleepRem),
+    _StageLabel('Core',  AppColors.sleepCore),
+    _StageLabel('Deep',  AppColors.sleepDeep),
+    _StageLabel('Awake', AppColors.sleepAwake),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final stages = hp.sleepStages;
+    return GFCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionHeader(title: 'Sleep Stages'),
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 80,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: stages.map((s) {
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: FractionallySizedBox(
+                      heightFactor: s.heightFraction,
+                      alignment: Alignment.bottomCenter,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: s.color,
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(4),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: s.color.withValues(alpha: 0.4),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: _stageLabels.map((l) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 10, height: 10,
+                  decoration: BoxDecoration(
+                    color: l.color, shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(l.label, style: AppTextStyles.label),
+              ],
+            )).toList(),
           ),
         ],
       ),
@@ -360,174 +560,163 @@ class _TimeCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────
-//  Sleep Stages Chart
-// ─────────────────────────────────────────────────────
-class _SleepStagesChart extends StatelessWidget {
-  final HealthProvider health;
-  const _SleepStagesChart({required this.health});
+class _StageLabel {
+  final String label;
+  final Color color;
+  const _StageLabel(this.label, this.color);
+}
+
+// ─── Weekly Trend ─────────────────────────────────────────────────────────────
+class _WeeklyTrend extends StatelessWidget {
+  final HealthProvider hp;
+  const _WeeklyTrend({required this.hp});
+
+  static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0x1A190F23),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.12)),
-      ),
+    final data = hp.sleepWeekly;
+    return GFCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Sleep Stages', style: AppTextStyles.headingSm),
-                  const SizedBox(height: 2),
-                  Text('Total: ${health.sleepDuration}',
-                    style: AppTextStyles.caption.copyWith(color: AppColors.textMuted)),
-                ],
-              ),
-              NeonBadge(
-                label: '${(health.sleepEfficiency * 100).toInt()}% Efficiency',
-                color: AppColors.accentGreen,
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-
-          // Stage bars
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: health.sleepStages.map((stage) {
-              return Expanded(
-                flex: ((stage.widthFraction * 100).toInt()),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 1),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
+              const SectionHeader(title: '7-Day Sleep Trend'),
+              if (hp.syncLabel.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(50),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 1000),
-                        curve: Curves.easeOutCubic,
-                        height: 100 * stage.heightFraction,
-                        decoration: BoxDecoration(
-                          color: stage.color.withValues(alpha: 0.5),
-                          borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
-                          border: stage.name == 'REM'
-                              ? Border(top: BorderSide(color: stage.color, width: 2))
-                              : null,
-                          boxShadow: stage.name == 'REM'
-                              ? [BoxShadow(color: stage.color.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, -4))]
-                              : null,
-                        ),
+                      const Icon(Icons.health_and_safety_rounded,
+                        color: AppColors.success, size: 12),
+                      const SizedBox(width: 4),
+                      Text('Live',
+                        style: AppTextStyles.tag.copyWith(color: AppColors.success),
                       ),
                     ],
                   ),
                 ),
-              );
-            }).toList(),
-          ),
-
-          const SizedBox(height: 14),
-          Divider(color: Colors.white.withValues(alpha: 0.05), height: 1),
-          const SizedBox(height: 10),
-
-          // Legend
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _LegendDot(color: AppColors.primary, label: 'REM'),
-              _LegendDot(color: const Color(0xFF60A5FA), label: 'Core'),
-              _LegendDot(color: const Color(0xFF1E3A8A), label: 'Deep'),
-              _LegendDot(color: const Color(0xFFEF4444), label: 'Awake'),
             ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LegendDot extends StatelessWidget {
-  final Color color;
-  final String label;
-  const _LegendDot({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 4),
-        Text(label.toUpperCase(),
-          style: AppTextStyles.label.copyWith(color: AppColors.textMuted, fontSize: 9)),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────
-//  7-Day Weekly Trend
-// ─────────────────────────────────────────────────────
-class _WeeklyTrend extends StatelessWidget {
-  final HealthProvider health;
-  const _WeeklyTrend({required this.health});
-
-  final _days = const ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0x1A190F23),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.12)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('7-DAY TREND',
-            style: AppTextStyles.label.copyWith(color: AppColors.textMuted, letterSpacing: 2)),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: List.generate(7, (i) {
-              final isToday = i == 3;
-              return Column(
-                children: [
-                  AnimatedContainer(
-                    duration: Duration(milliseconds: 600 + i * 100),
-                    curve: Curves.easeOutCubic,
-                    width: 8,
-                    height: 80 * health.sleepWeekly[i],
-                    decoration: BoxDecoration(
-                      color: isToday ? AppColors.primary : Colors.white.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(4),
-                      boxShadow: isToday
-                          ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.5), blurRadius: 10)]
-                          : null,
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 80,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(data.length, (i) {
+                final isToday = i == data.length - 1;
+                final barHeight = (data[i] > 0.02) ? data[i] : 0.05;
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: i == data.length - 1 ? 0 : 6,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Flexible(
+                          child: FractionallySizedBox(
+                            heightFactor: barHeight,
+                            alignment: Alignment.bottomCenter,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: isToday
+                                    ? AppGradients.fire
+                                    : LinearGradient(
+                                        colors: [
+                                          const Color(0xFF9C27B0).withValues(alpha: 0.5),
+                                          const Color(0xFF9C27B0),
+                                        ],
+                                        begin: Alignment.bottomCenter,
+                                        end: Alignment.topCenter,
+                                      ),
+                                borderRadius: BorderRadius.circular(6),
+                                boxShadow: isToday
+                                    ? [BoxShadow(
+                                        color: AppColors.primary.withValues(alpha: 0.5),
+                                        blurRadius: 8,
+                                      )]
+                                    : null,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _days[i % _days.length],
+                          style: AppTextStyles.label.copyWith(
+                            color: isToday
+                                ? AppColors.primary
+                                : AppColors.textMuted,
+                            fontWeight: isToday
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(_days[i],
-                    style: TextStyle(
-                      fontFamily: AppTextStyles.fontFamily,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: isToday ? AppColors.primary : AppColors.textMuted,
-                    )),
-                ],
-              );
-            }),
+                );
+              }),
+            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Sleep Tip ────────────────────────────────────────────────────────────────
+class _SleepTip extends StatefulWidget {
+  @override
+  State<_SleepTip> createState() => _SleepTipState();
+}
+
+class _SleepTipState extends State<_SleepTip> {
+  String _tip = 'Consistent sleep and wake times improve deep sleep quality by up to 30%.'; 
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadTip());
+  }
+
+  double _parseSleepHours(String s) {
+    try {
+      final h = RegExp(r'(\d+\.?\d*)h').firstMatch(s);
+      final m = RegExp(r'(\d+)m').firstMatch(s);
+      final hours = double.tryParse(h?.group(1) ?? '0') ?? 0;
+      final mins  = double.tryParse(m?.group(1) ?? '0') ?? 0;
+      return hours + mins / 60;
+    } catch (_) { return 7.0; }
+  }
+
+  Future<void> _loadTip() async {
+    if (!mounted) return;
+    final hp = context.read<HealthProvider>();
+    try {
+      final tip = await ClaudeHealthTipsService.instance.getSleepTip(
+        sleepHours: _parseSleepHours(hp.sleepDuration),
+        score: hp.score.toInt(),
+        deepSleepPct: hp.sleepScore > 0 ? (hp.sleepScore / 100) : 0.2,
+      );
+      if (mounted) setState(() => _tip = tip);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InfoBanner(
+      message: _tip,
+      icon: Icons.bolt_rounded,
+      color: const Color(0xFF9C27B0),
     );
   }
 }

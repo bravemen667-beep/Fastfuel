@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "242417786200",
+    "project_id": "gofaster-ca39c",
+    "storage_bucket": "gofaster-ca39c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:242417786200:android:42228916d5e66123c2192d",
+        "android_client_info": {
+          "package_name": "com.gofasterhealth.tracker"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "242417786200-m03hb3t93f7cv5korbg21nf2pu918bpg.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAWykgqQEIc9EEcIQ_9mC_LK7RA_m7gVYU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "242417786200-m03hb3t93f7cv5korbg21nf2pu918bpg.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

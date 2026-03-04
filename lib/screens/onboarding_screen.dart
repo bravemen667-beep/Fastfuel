@@ -3,7 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
-import 'main_shell.dart';
+import 'login_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -13,200 +13,174 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  final _pageController = PageController();
-  int _currentPage = 0;
+  final _controller = PageController();
+  int _page = 0;
 
-  final _pages = const [
+  static const _pages = [
     _OnboardPage(
-      title: 'Fuel Your\nPerformance',
-      subtitle: 'Science-backed hydration, nutrition & sleep insights — all in one place.',
+      title: 'Track Every\nRepeat.',
+      subtitle: 'Your body, your rules. Monitor water, calories, sleep and vitamins — all in one shot.',
       icon: Icons.bolt_rounded,
-      accentColor: AppColors.primary,
-      features: const [
-        _Feature(Icons.water_drop_rounded, 'Smart Hydration Tracking'),
-        _Feature(Icons.local_fire_department_rounded, 'Calorie & Macro Goals'),
-        _Feature(Icons.bedtime_rounded, 'Sleep Quality Analysis'),
-      ],
+      step: 'Fuel your performance',
     ),
     _OnboardPage(
-      title: 'AI-Powered\nWorkout Plans',
-      subtitle: 'Your GoFaster Score adapts daily workouts to your recovery & energy levels.',
-      icon: Icons.fitness_center_rounded,
-      accentColor: AppColors.neonBlue,
-      features: const [
-        _Feature(Icons.auto_awesome_rounded, 'AI Workout Recommendations'),
-        _Feature(Icons.monitor_heart_rounded, 'HRV & Recovery Alerts'),
-        _Feature(Icons.trending_up_rounded, 'Performance Scoring'),
-      ],
+      title: 'Hit Goals\nFaster.',
+      subtitle: 'Set daily targets. AI-powered insights push you harder every single session.',
+      icon: Icons.track_changes_rounded,
+      step: 'Smart daily goals',
     ),
     _OnboardPage(
-      title: 'Daily Vitamin\nProtocol',
-      subtitle: 'Track your GoFaster supplement stack and never miss a dose again.',
-      icon: Icons.medication_rounded,
-      accentColor: AppColors.neonGreen,
-      features: const [
-        _Feature(Icons.medication_liquid_rounded, 'Vitamin Intake Logging'),
-        _Feature(Icons.notifications_active_rounded, 'Smart Reminders'),
-        _Feature(Icons.inventory_2_rounded, 'Stock Alerts & Reorder'),
-      ],
+      title: 'No Excuses.\nJust Results.',
+      subtitle: 'Streaks, reminders, and real-time scores keep you accountable 24/7.',
+      icon: Icons.emoji_events_rounded,
+      step: 'Stay consistent',
     ),
   ];
 
-  void _nextPage() {
-    if (_currentPage < _pages.length - 1) {
-      _pageController.nextPage(
+  void _next() {
+    if (_page < _pages.length - 1) {
+      _controller.nextPage(
         duration: const Duration(milliseconds: 400),
         curve: Curves.easeInOutCubic,
       );
     } else {
-      _launchApp();
+      _goToApp();
     }
   }
 
-  void _launchApp() {
-    Navigator.of(context).pushReplacement(
+  void _goToApp() {
+    Navigator.pushReplacement(
+      context,
       PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const MainShell(),
-        transitionsBuilder: (_, anim, __, child) =>
-            FadeTransition(opacity: anim, child: child),
+        pageBuilder: (_, __, ___) => const LoginScreen(),
         transitionDuration: const Duration(milliseconds: 500),
+        transitionsBuilder: (_, animation, __, child) => FadeTransition(
+          opacity: animation,
+          child: child,
+        ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     return Scaffold(
-      backgroundColor: AppColors.bgDark,
+      backgroundColor: AppColors.background,
       body: Stack(
         children: [
-          // ── Ambient background glow ──────────────────
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 600),
-            child: SizedBox(
-              key: ValueKey(_currentPage),
-              width: size.width,
-              height: size.height,
-              child: Stack(children: [
-                GlowBlob(
-                  color: _pages[_currentPage].accentColor,
-                  size: size.width * 1.4,
-                  alignment: const Alignment(0, -0.4),
-                  opacity: 0.12,
+          // Background glow orbs
+          Positioned(
+            top: -80, right: -60,
+            child: Container(
+              width: 250, height: 250,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    AppColors.primary.withValues(alpha: 0.25),
+                    Colors.transparent,
+                  ],
                 ),
-                GlowBlob(
-                  color: _pages[_currentPage].accentColor,
-                  size: size.width * 0.8,
-                  alignment: const Alignment(0.8, 0.8),
-                  opacity: 0.08,
-                ),
-              ]),
+              ),
             ),
           ),
-
-          // ── Floating orb bubbles ─────────────────────
-          const _FloatingBubbles(),
+          Positioned(
+            bottom: 100, left: -80,
+            child: Container(
+              width: 200, height: 200,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    AppColors.accent.withValues(alpha: 0.15),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
 
           SafeArea(
             child: Column(
               children: [
-                // ── Skip button ──────────────────────────
+                // Skip
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Logo
                       Row(
                         children: [
                           Container(
-                            width: 36,
-                            height: 36,
+                            width: 36, height: 36,
                             decoration: BoxDecoration(
-                              gradient: AppGradients.primaryGradient,
+                              gradient: AppGradients.fire,
                               borderRadius: BorderRadius.circular(10),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppColors.primary.withValues(alpha: 0.5),
-                                  blurRadius: 12,
-                                ),
-                              ],
                             ),
-                            child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
+                            child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 22),
                           ),
-                          const SizedBox(width: 8),
-                          Text('GoFaster', style: AppTextStyles.headingSm.copyWith(
-                            color: Colors.white,
-                            fontSize: 17,
-                          )),
+                          const SizedBox(width: 10),
+                          Text('GoFaster', style: AppTextStyles.h4.copyWith(color: AppColors.primary)),
                         ],
-                      ).animate().fadeIn(duration: 600.ms),
-                      if (_currentPage < _pages.length - 1)
-                        TextButton(
-                          onPressed: _launchApp,
-                          child: Text('Skip',
-                            style: AppTextStyles.bodyMedium.copyWith(
-                              color: AppColors.textMuted,
+                      ),
+                      if (_page < _pages.length - 1)
+                        GestureDetector(
+                          onTap: _goToApp,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(50),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: Text('Skip', style: AppTextStyles.caption.copyWith(
+                              color: AppColors.textSecondary,
                             )),
-                        ).animate().fadeIn(duration: 600.ms),
+                          ),
+                        ),
                     ],
                   ),
                 ),
 
-                // ── Page content ─────────────────────────
+                // Pages
                 Expanded(
                   child: PageView.builder(
-                    controller: _pageController,
-                    onPageChanged: (i) => setState(() => _currentPage = i),
+                    controller: _controller,
+                    onPageChanged: (i) => setState(() => _page = i),
                     itemCount: _pages.length,
-                    itemBuilder: (_, i) => _pages[i],
+                    itemBuilder: (context, index) => _PageContent(
+                      page: _pages[index],
+                      pageIndex: index,
+                      screenSize: size,
+                    ),
                   ),
                 ),
 
-                // ── Bottom controls ──────────────────────
+                // Bottom controls
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(28, 0, 28, 32),
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 40),
                   child: Column(
                     children: [
                       SmoothPageIndicator(
-                        controller: _pageController,
+                        controller: _controller,
                         count: _pages.length,
                         effect: ExpandingDotsEffect(
-                          activeDotColor: _pages[_currentPage].accentColor,
-                          dotColor: Colors.white.withValues(alpha: 0.15),
-                          dotHeight: 6,
-                          dotWidth: 6,
+                          activeDotColor: AppColors.primary,
+                          dotColor: AppColors.border,
+                          dotHeight: 8,
+                          dotWidth: 8,
                           expansionFactor: 4,
+                          spacing: 6,
                         ),
                       ),
                       const SizedBox(height: 28),
-                      GradientButton(
-                        label: _currentPage < _pages.length - 1
-                            ? 'Continue'
-                            : 'Start Your Journey',
-                        icon: _currentPage < _pages.length - 1
-                            ? Icons.arrow_forward_rounded
-                            : Icons.rocket_launch_rounded,
-                        gradient: LinearGradient(
-                          colors: [
-                            _pages[_currentPage].accentColor,
-                            AppColors.primary,
-                          ],
-                        ),
-                        onPressed: _nextPage,
-                      ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.3),
-                      const SizedBox(height: 16),
-                      Text(
-                        'By continuing you agree to our Terms of Service',
-                        style: AppTextStyles.label.copyWith(color: AppColors.textMuted),
-                        textAlign: TextAlign.center,
+                      GFPrimaryButton(
+                        label: _page == _pages.length - 1 ? 'Start Going Faster' : 'Continue',
+                        icon: _page == _pages.length - 1
+                            ? Icons.bolt_rounded
+                            : Icons.arrow_forward_rounded,
+                        onTap: _next,
                       ),
                     ],
                   ),
@@ -220,186 +194,153 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-// ── Single Onboarding Page ───────────────────────────
-class _OnboardPage extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Color accentColor;
-  final List<_Feature> features;
+class _PageContent extends StatelessWidget {
+  final _OnboardPage page;
+  final int pageIndex;
+  final Size screenSize;
 
-  const _OnboardPage({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.accentColor,
-    required this.features,
+  const _PageContent({
+    required this.page,
+    required this.pageIndex,
+    required this.screenSize,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 28),
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Icon badge
+          // Hero icon card
           Container(
-            width: 88,
-            height: 88,
+            width: screenSize.width * 0.65,
+            height: screenSize.width * 0.65,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [accentColor.withValues(alpha: 0.3), accentColor.withValues(alpha: 0.05)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(26),
-              border: Border.all(color: accentColor.withValues(alpha: 0.3)),
+              color: AppColors.cardBg,
+              borderRadius: BorderRadius.circular(40),
+              border: Border.all(color: AppColors.border, width: 1),
               boxShadow: [
                 BoxShadow(
-                  color: accentColor.withValues(alpha: 0.3),
-                  blurRadius: 32,
-                  spreadRadius: -4,
+                  color: AppColors.primary.withValues(alpha: 0.20),
+                  blurRadius: 40, spreadRadius: -5,
                 ),
               ],
             ),
-            child: Icon(icon, color: accentColor, size: 42),
-          ).animate().scale(duration: 500.ms, curve: Curves.easeOutBack),
-
-          const SizedBox(height: 32),
-
-          Text(title,
-            style: AppTextStyles.headingXL.copyWith(
-              fontSize: 36,
-              height: 1.15,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Concentric rings
+                ...List.generate(3, (i) => Container(
+                  width: (screenSize.width * 0.25) + (i * 45.0),
+                  height: (screenSize.width * 0.25) + (i * 45.0),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: AppColors.primary.withValues(alpha: 0.10 - (i * 0.025)),
+                      width: 1,
+                    ),
+                  ),
+                )),
+                // Icon
+                Container(
+                  width: 90, height: 90,
+                  decoration: BoxDecoration(
+                    gradient: AppGradients.fire,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.5),
+                        blurRadius: 30, spreadRadius: -5,
+                      ),
+                    ],
+                  ),
+                  child: Icon(page.icon, color: Colors.white, size: 46),
+                ),
+                // Stats decorators
+                Positioned(
+                  top: 25, right: 25,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(50),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.trending_up_rounded, color: AppColors.success, size: 14),
+                        const SizedBox(width: 4),
+                        Text('88', style: AppTextStyles.caption.copyWith(
+                          color: AppColors.success, fontWeight: FontWeight.w700,
+                        )),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: 25, left: 25,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      gradient: AppGradients.fire,
+                      borderRadius: BorderRadius.circular(50),
+                    ),
+                    child: Text('GO FASTER', style: AppTextStyles.label.copyWith(
+                      color: Colors.white,
+                    )),
+                  ),
+                ),
+              ],
             ),
-          ).animate().fadeIn(duration: 500.ms).slideX(begin: -0.1),
+          ).animate().scale(
+            begin: const Offset(0.85, 0.85),
+            end: const Offset(1.0, 1.0),
+            duration: 500.ms,
+            curve: Curves.easeOutBack,
+          ).fade(duration: 400.ms),
+
+          const SizedBox(height: 40),
+
+          // Step label
+          GFTag(label: page.step, color: AppColors.primary)
+              .animate(delay: 200.ms)
+              .fade(duration: 400.ms)
+              .slideY(begin: 0.3, end: 0),
+
+          const SizedBox(height: 16),
+
+          // Title
+          Text(
+            page.title,
+            style: AppTextStyles.h1,
+            textAlign: TextAlign.center,
+          ).animate(delay: 300.ms).fade(duration: 400.ms).slideY(begin: 0.3, end: 0),
 
           const SizedBox(height: 14),
 
-          Text(subtitle,
-            style: AppTextStyles.body.copyWith(
-              fontSize: 15,
-              height: 1.6,
-              color: AppColors.textSecondary,
-            ),
-          ).animate().fadeIn(delay: 150.ms, duration: 500.ms),
-
-          const SizedBox(height: 36),
-
-          // Feature list
-          ...features.asMap().entries.map((e) {
-            final delay = (e.key * 100 + 200).ms;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Row(
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: accentColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(13),
-                      border: Border.all(color: accentColor.withValues(alpha: 0.25)),
-                    ),
-                    child: Icon(e.value.icon, color: accentColor, size: 20),
-                  ),
-                  const SizedBox(width: 14),
-                  Text(e.value.label,
-                    style: AppTextStyles.bodyMedium.copyWith(fontSize: 15),
-                  ),
-                ],
-              ).animate().fadeIn(delay: delay, duration: 400.ms).slideX(begin: 0.15),
-            );
-          }),
+          // Subtitle
+          Text(
+            page.subtitle,
+            style: AppTextStyles.bodySm.copyWith(height: 1.6),
+            textAlign: TextAlign.center,
+          ).animate(delay: 400.ms).fade(duration: 400.ms).slideY(begin: 0.3, end: 0),
         ],
       ),
     );
   }
 }
 
-class _Feature {
+class _OnboardPage {
+  final String title;
+  final String subtitle;
   final IconData icon;
-  final String label;
-  const _Feature(this.icon, this.label);
-}
-
-// ── Floating decorative bubbles ──────────────────────
-class _FloatingBubbles extends StatefulWidget {
-  const _FloatingBubbles();
-
-  @override
-  State<_FloatingBubbles> createState() => _FloatingBubblesState();
-}
-
-class _FloatingBubblesState extends State<_FloatingBubbles>
-    with TickerProviderStateMixin {
-  late List<AnimationController> _controllers;
-
-  final _bubbles = [
-    _Bubble(0.15, 0.22, 14, AppColors.primary, 0.4),
-    _Bubble(0.80, 0.35, 20, AppColors.neonBlue, 0.3),
-    _Bubble(0.25, 0.50, 10, AppColors.primary, 0.5),
-    _Bubble(0.90, 0.15, 8, Colors.white, 0.15),
-    _Bubble(0.65, 0.72, 16, AppColors.primary, 0.25),
-    _Bubble(0.10, 0.68, 12, AppColors.neonGreen, 0.2),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _controllers = List.generate(_bubbles.length, (i) {
-      final c = AnimationController(
-        vsync: this,
-        duration: Duration(milliseconds: 1800 + i * 400),
-      )..repeat(reverse: true);
-      return c;
-    });
-  }
-
-  @override
-  void dispose() {
-    for (final c in _controllers) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    return Stack(
-      children: List.generate(_bubbles.length, (i) {
-        final b = _bubbles[i];
-        return AnimatedBuilder(
-          animation: _controllers[i],
-          builder: (_, __) => Positioned(
-            left: size.width * b.x,
-            top: size.height * b.y + (_controllers[i].value - 0.5) * 12,
-            child: Container(
-              width: b.size,
-              height: b.size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: b.color.withValues(alpha: b.opacity),
-                boxShadow: [
-                  BoxShadow(
-                    color: b.color.withValues(alpha: b.opacity * 0.6),
-                    blurRadius: b.size,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      }),
-    );
-  }
-}
-
-class _Bubble {
-  final double x, y, size, opacity;
-  final Color color;
-  const _Bubble(this.x, this.y, this.size, this.color, this.opacity);
+  final String step;
+  const _OnboardPage({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.step,
+  });
 }
