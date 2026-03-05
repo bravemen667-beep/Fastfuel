@@ -60,6 +60,18 @@ dependencies:
   # Image picker for camera/gallery (Scan Food)
   image_picker: 1.1.2
 
+  # Camera for food scanner live preview
+  camera: 0.10.5+9
+
+  # Barcode / QR scanning
+  mobile_scanner: 5.2.3
+
+  # FontAwesome icons for share screen
+  font_awesome_flutter: 10.7.0
+
+  # Secure token storage (replaces plain SharedPreferences for auth state)
+  flutter_secure_storage: 9.2.2
+
   # Native splash screen (orange background, white bolt)
   flutter_native_splash: 2.4.1
 
@@ -72,6 +84,7 @@ dev_dependencies:
   flutter_lints: 5.0.0
   hive_generator: 2.0.1
   build_runner: 2.4.13
+  flutter_launcher_icons: 0.14.3
 
 flutter:
   uses-material-design: true
@@ -92,3 +105,13 @@ flutter_native_splash:
     color_dark: "#0D0D0D"
     image: assets/icons/app_icon.png
   fullscreen: true
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icons/app_icon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#0D0D0D"
+  adaptive_icon_foreground: "assets/icons/app_icon.png"
+  web:
+    generate: false

@@ -69,8 +69,8 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _refreshing = true);
     try {
       final hp   = context.read<HealthProvider>();
-      final auth = context.read<AuthProvider>();
-      final uid  = auth.uid.isEmpty ? 'guest_user' : auth.uid;
+      final auth = context.read<GFAuthProvider>();
+      final uid  = auth.uid.isEmpty ? auth.firestoreUid : auth.uid;
       await hp.initForUser(uid, auth.userName);
       await Future.delayed(const Duration(milliseconds: 500));
     } finally {
@@ -81,7 +81,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final hp   = context.watch<HealthProvider>();
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<GFAuthProvider>();
 
     if (hp.isLoading) {
       return const Scaffold(
@@ -116,7 +116,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 20),
                 ElevatedButton.icon(
                   onPressed: () {
-                    final uid = auth.uid.isEmpty ? 'guest_user' : auth.uid;
+                    final uid = auth.uid.isEmpty ? auth.firestoreUid : auth.uid;
                     hp.initForUser(uid, auth.userName);
                   },
                   icon: const Icon(Icons.refresh_rounded),
@@ -179,13 +179,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildAppBar(BuildContext context, HealthProvider hp) {
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<GFAuthProvider>();
     final greeting = '${auth.greeting}! 💪';
-    final displayName = auth.isGuest
-        ? 'Guest User'
-        : (hp.profileName.isNotEmpty
-            ? hp.profileName
-            : (auth.userName.isEmpty ? 'Alex Kumar' : auth.userName));
+    final displayName = hp.profileName.isNotEmpty
+        ? hp.profileName
+        : (auth.userName.isEmpty ? 'User' : auth.userName);
     return SliverAppBar(
       pinned: false,
       floating: true,

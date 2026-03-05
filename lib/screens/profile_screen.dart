@@ -17,14 +17,14 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hp   = context.watch<HealthProvider>();
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<GFAuthProvider>();
     return Scaffold(
       backgroundColor: AppColors.background,
       body: hp.isLoading
           ? const _LoadingBody()
           : hp.error != null
               ? _ErrorBody(error: hp.error!, onRetry: () {
-                  final uid  = auth.uid.isEmpty ? 'guest_user' : auth.uid;
+                  final uid  = auth.uid.isEmpty ? auth.firestoreUid : auth.uid;
                   hp.initForUser(uid, auth.userName);
                 })
               : CustomScrollView(
@@ -176,7 +176,7 @@ class _ErrorBody extends StatelessWidget {
 // ─── Profile Hero ─────────────────────────────────────────
 class _ProfileHero extends StatelessWidget {
   final HealthProvider hp;
-  final AuthProvider auth;
+  final GFAuthProvider auth;
   const _ProfileHero({required this.hp, required this.auth});
 
   @override
@@ -184,7 +184,7 @@ class _ProfileHero extends StatelessWidget {
     // Show Firestore name if available, fall back to auth name
     final displayName = hp.profileName.isNotEmpty
         ? hp.profileName
-        : (auth.isGuest ? 'Guest User' : (auth.userName.isEmpty ? 'Alex Kumar' : auth.userName));
+        : (auth.userName.isEmpty ? 'User' : auth.userName);
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -229,7 +229,7 @@ class _ProfileHero extends StatelessWidget {
           const SizedBox(height: 16),
           Text(displayName, style: AppTextStyles.h3),
           const SizedBox(height: 4),
-          Text(auth.isGuest ? 'Guest · Full Access Enabled' : 'Everyday Athlete · GoFaster',
+          Text('Everyday Athlete · GoFaster',
             style: AppTextStyles.bodySm),
           const SizedBox(height: 12),
           Row(
@@ -750,7 +750,7 @@ class _LogoutButton extends StatelessWidget {
           ),
         );
         if (confirmed == true && context.mounted) {
-          await context.read<AuthProvider>().logout();
+          await context.read<GFAuthProvider>().logout();
         }
         },
         borderRadius: BorderRadius.circular(20),

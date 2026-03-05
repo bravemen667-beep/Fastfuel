@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/app_theme.dart';
 import '../providers/auth_provider.dart';
-import 'main_shell.dart';
 import 'otp_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -40,7 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _sendOtp() async {
     if (!_phoneValid) return;
     final phone = _phoneCtrl.text.trim();
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<GFAuthProvider>();
 
     final ok = await auth.sendOtp(phone);
     if (!mounted) return;
@@ -57,18 +56,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // ── Google Sign-In ──────────────────────────────────
   Future<void> _googleSignIn() async {
-    final auth = context.read<AuthProvider>();
-    final ok = await auth.loginWithGoogle();
+    final auth = context.read<GFAuthProvider>();
+    bool ok;
+    try {
+      ok = await auth.loginWithGoogle();
+    } catch (e) {
+      ok = false;
+    }
     if (!mounted) return;
 
     if (ok) {
-      _goToHome();
-    } else {
-      _showGoogleSignInError();
+      // _AuthGate StreamBuilder reacts automatically — no manual navigation needed
+      return;
     }
+    // Show the error from provider (already set in auth.errorMessage)
+    final msg = auth.errorMessage ?? 'Google Sign-In failed. Please try again.';
+    _showGoogleSignInError(msg);
   }
 
-  void _showGoogleSignInError() {
+  void _showGoogleSignInError(String message) {
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -91,7 +97,7 @@ class _LoginScreenState extends State<LoginScreen> {
               Text('Sign In Failed', style: AppTextStyles.h4),
               const SizedBox(height: 8),
               Text(
-                'Sign in failed. Please try again.\n\nIf the issue persists, ensure your device has an active internet connection and Google Play Services are up to date.',
+                message,
                 style: AppTextStyles.bodySm.copyWith(height: 1.5),
                 textAlign: TextAlign.center,
               ),
@@ -133,24 +139,10 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // ── Guest ────────────────────────────────────────────
+  // Guest mode permanently disabled — method kept for compile safety
+  // ignore: unused_element
   Future<void> _guestLogin() async {
-    await context.read<AuthProvider>().continueAsGuest();
-    if (!mounted) return;
-    _goToHome();
-  }
-
-  void _goToHome() {
-    Navigator.pushAndRemoveUntil(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const MainShell(),
-        transitionDuration: const Duration(milliseconds: 500),
-        transitionsBuilder: (_, anim, __, child) =>
-            FadeTransition(opacity: anim, child: child),
-      ),
-      (_) => false,
-    );
+    // Guest bypass removed. Do nothing.
   }
 
   void _showError(String msg) {
@@ -173,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<GFAuthProvider>();
     final size = MediaQuery.of(context).size;
 
     return Scaffold(
@@ -250,11 +242,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ).animate(delay: 400.ms).fade(duration: 500.ms).slideY(begin: 0.2, end: 0),
 
                       const SizedBox(height: 16),
-
-                      // ── Guest ─────────────────────────
-                      _GuestButton(
-                        onTap: _guestLogin,
-                      ).animate(delay: 450.ms).fade(duration: 500.ms),
 
                       const SizedBox(height: 36),
 
@@ -544,40 +531,6 @@ class _GoogleIcon extends StatelessWidget {
             fontWeight: FontWeight.bold,
             color: const Color(0xFF4285F4),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Guest Button ─────────────────────────────────────────
-class _GuestButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _GuestButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: TextButton(
-        onPressed: onTap,
-        style: TextButton.styleFrom(
-          foregroundColor: AppColors.textSecondary,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.person_outline_rounded, color: AppColors.textMuted, size: 16),
-            const SizedBox(width: 6),
-            Text(
-              'Continue as Guest',
-              style: AppTextStyles.bodySm.copyWith(
-                color: AppColors.textMuted,
-                decoration: TextDecoration.underline,
-                decorationColor: AppColors.textMuted,
-              ),
-            ),
-          ],
         ),
       ),
     );

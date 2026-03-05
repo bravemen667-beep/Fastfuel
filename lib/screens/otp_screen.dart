@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/app_theme.dart';
 import '../providers/auth_provider.dart';
-import '../screens/main_shell.dart';
 
 class OtpScreen extends StatefulWidget {
   final String phone;
@@ -16,24 +15,23 @@ class OtpScreen extends StatefulWidget {
 }
 
 class _OtpScreenState extends State<OtpScreen> {
-  static const int _otpLength = 6;
-  static const int _timerSeconds = 30;
+  static const int _otpLength     = 6;
+  static const int _timerSeconds  = 60; // 60-second countdown per spec
 
   final List<TextEditingController> _controllers =
       List.generate(_otpLength, (_) => TextEditingController());
   final List<FocusNode> _focusNodes =
       List.generate(_otpLength, (_) => FocusNode());
 
-  int _secondsLeft = _timerSeconds;
-  Timer? _timer;
-  bool _verifying = false;
+  int     _secondsLeft = _timerSeconds;
+  Timer?  _timer;
+  bool    _verifying   = false;
   String? _errorMsg;
 
   @override
   void initState() {
     super.initState();
     _startTimer();
-    // Auto-focus first box
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNodes[0].requestFocus();
     });
@@ -43,16 +41,16 @@ class _OtpScreenState extends State<OtpScreen> {
   void dispose() {
     _timer?.cancel();
     for (final c in _controllers) { c.dispose(); }
-    for (final f in _focusNodes) { f.dispose(); }
+    for (final f in _focusNodes)  { f.dispose(); }
     super.dispose();
   }
 
-  // ── Timer ─────────────────────────────────────────────
+  // ── Timer ─────────────────────────────────────────────────────────────────
   void _startTimer() {
     _timer?.cancel();
     setState(() {
       _secondsLeft = _timerSeconds;
-      _errorMsg = null;
+      _errorMsg    = null;
     });
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) { t.cancel(); return; }
@@ -66,15 +64,13 @@ class _OtpScreenState extends State<OtpScreen> {
     });
   }
 
-  // ── OTP Input Handling ───────────────────────────────
+  // ── OTP Input ─────────────────────────────────────────────────────────────
   void _onOtpInput(String val, int index) {
     setState(() => _errorMsg = null);
-
     if (val.isNotEmpty) {
       if (index < _otpLength - 1) {
         _focusNodes[index + 1].requestFocus();
       } else {
-        // Last digit — auto-verify
         _focusNodes[index].unfocus();
         _verify();
       }
@@ -91,61 +87,82 @@ class _OtpScreenState extends State<OtpScreen> {
     }
   }
 
-  String get _otpValue =>
-      _controllers.map((c) => c.text).join();
+  String get _otpValue => _controllers.map((c) => c.text).join();
 
-  // ── Verify ───────────────────────────────────────────
+  // ── Verify ────────────────────────────────────────────────────────────────
   Future<void> _verify() async {
+    final auth = context.read<GFAuthProvider>();
+
+    // Client-side guard: blocked after 3 wrong attempts
+    if (auth.otpBlocked) {
+      setState(() => _errorMsg = 'Too many attempts. Please request a new OTP.');
+      return;
+    }
+
     final otp = _otpValue;
+
+    // Client-side: must be exactly 6 digits before calling Firebase
     if (otp.length < _otpLength) {
-      setState(() => _errorMsg = 'Please enter all $_otpLength digits');
+      setState(() => _errorMsg = 'Please enter all $_otpLength digits.');
       return;
     }
 
     setState(() {
       _verifying = true;
-      _errorMsg = null;
+      _errorMsg  = null;
     });
 
-    final auth = context.read<AuthProvider>();
-    final ok = await auth.loginWithPhone(phone: widget.phone, otp: otp);
+    try {
+      final ok = await auth.loginWithPhone(
+        phone: widget.phone,
+        otp:   otp,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    if (ok) {
-      _goToHome();
-    } else {
+      if (ok) {
+        // FirebaseAuth stream in _AuthGate will handle routing automatically.
+        // Pop back to login so the stream rebuild replaces the entire stack.
+        Navigator.popUntil(context, (r) => r.isFirst);
+      } else {
+        final errMsg = auth.errorMessage ?? 'Invalid OTP. Please try again.';
+        setState(() {
+          _verifying = false;
+          _errorMsg  = errMsg;
+        });
+        // Clear boxes + refocus for next attempt
+        for (final c in _controllers) { c.clear(); }
+        _focusNodes[0].requestFocus();
+      }
+    } on OtpBlockedException catch (e) {
+      if (!mounted) return;
       setState(() {
         _verifying = false;
-        _errorMsg = 'Invalid OTP. Please try again.';
-        // Clear & refocus
-        for (final c in _controllers) { c.clear(); }
+        _errorMsg  = e.message;
       });
-      _focusNodes[0].requestFocus();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _verifying = false;
+        _errorMsg  = 'Verification failed. Please try again.';
+      });
     }
   }
 
-  // ── Resend OTP ───────────────────────────────────────
+  // ── Resend OTP ────────────────────────────────────────────────────────────
   Future<void> _resendOtp() async {
     if (_secondsLeft > 0) return;
-    final auth = context.read<AuthProvider>();
-    await auth.sendOtp(widget.phone);
+    final auth = context.read<GFAuthProvider>();
+    final ok = await auth.sendOtp(widget.phone);
     if (!mounted) return;
-    _startTimer();
-    _showSnack('OTP sent to +91 ${widget.phone}');
-  }
-
-  void _goToHome() {
-    Navigator.pushAndRemoveUntil(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const MainShell(),
-        transitionDuration: const Duration(milliseconds: 500),
-        transitionsBuilder: (_, anim, __, child) =>
-            FadeTransition(opacity: anim, child: child),
-      ),
-      (_) => false,
-    );
+    if (ok) {
+      _startTimer();
+      // Reset attempt counter on fresh OTP
+      _showSnack('New OTP sent to +91 ${widget.phone}');
+    } else {
+      final msg = auth.errorMessage ?? 'Could not send OTP. Please try again.';
+      setState(() => _errorMsg = msg);
+    }
   }
 
   void _showSnack(String msg) {
@@ -162,11 +179,13 @@ class _OtpScreenState extends State<OtpScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<GFAuthProvider>();
+    final blocked = auth.otpBlocked;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
-          // Glow orb
           Positioned(
             top: -40, right: -40,
             child: Container(
@@ -265,7 +284,7 @@ class _OtpScreenState extends State<OtpScreen> {
                       .animate(delay: 200.ms).fade(duration: 400.ms),
                   const SizedBox(height: 6),
                   Text(
-                    'We sent a code to your number. It expires in 10 minutes.',
+                    'We sent a verification code to your number. It expires in 10 minutes.',
                     style: AppTextStyles.bodySm,
                   ).animate(delay: 220.ms).fade(duration: 400.ms),
 
@@ -274,15 +293,16 @@ class _OtpScreenState extends State<OtpScreen> {
                   // OTP Boxes
                   _OtpBoxes(
                     controllers: _controllers,
-                    focusNodes: _focusNodes,
-                    onInput: _onOtpInput,
-                    onKeyDown: _onKeyDown,
-                    hasError: _errorMsg != null,
+                    focusNodes:  _focusNodes,
+                    onInput:     _onOtpInput,
+                    onKeyDown:   _onKeyDown,
+                    hasError:    _errorMsg != null,
+                    disabled:    blocked,
                   ).animate(delay: 300.ms).fade(duration: 500.ms).slideY(begin: 0.2, end: 0),
 
                   const SizedBox(height: 14),
 
-                  // Error message
+                  // Error / Blocked message
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 200),
                     child: _errorMsg != null
@@ -293,23 +313,36 @@ class _OtpScreenState extends State<OtpScreen> {
                               children: [
                                 const Icon(Icons.error_rounded, color: AppColors.error, size: 16),
                                 const SizedBox(width: 6),
-                                Text(_errorMsg!, style: AppTextStyles.bodySm.copyWith(
-                                  color: AppColors.error,
-                                )),
+                                Expanded(
+                                  child: Text(_errorMsg!, style: AppTextStyles.bodySm.copyWith(
+                                    color: AppColors.error,
+                                  )),
+                                ),
                               ],
                             ),
                           )
                         : const SizedBox.shrink(key: ValueKey('no-err')),
                   ),
 
+                  // Attempt counter
+                  if (auth.otpAttempts > 0 && !blocked)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '${GFAuthProvider.maxOtpAttempts - auth.otpAttempts} attempt${GFAuthProvider.maxOtpAttempts - auth.otpAttempts == 1 ? "" : "s"} remaining',
+                        style: AppTextStyles.label.copyWith(color: AppColors.warning),
+                      ),
+                    ),
+
                   const SizedBox(height: 24),
 
-                  // Verify Button
+                  // Verify Button (disabled when blocked)
                   _VerifyButton(
-                    otp: _otpValue,
+                    otp:       _otpValue,
                     otpLength: _otpLength,
                     verifying: _verifying,
-                    onVerify: _verify,
+                    disabled:  blocked,
+                    onVerify:  _verify,
                   ).animate(delay: 350.ms).fade(duration: 500.ms),
 
                   const SizedBox(height: 28),
@@ -317,33 +350,11 @@ class _OtpScreenState extends State<OtpScreen> {
                   // Resend
                   _ResendSection(
                     secondsLeft: _secondsLeft,
-                    onResend: _resendOtp,
+                    onResend:    _resendOtp,
+                    isLoading:   auth.isLoading,
                   ).animate(delay: 400.ms).fade(duration: 400.ms),
 
                   const Spacer(),
-
-                  // Demo hint
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(50),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.info_outline_rounded, color: AppColors.accent, size: 14),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Demo: Enter any 6 digits to login',
-                            style: AppTextStyles.label.copyWith(color: AppColors.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                   const SizedBox(height: 32),
                 ],
               ),
@@ -356,19 +367,20 @@ class _OtpScreenState extends State<OtpScreen> {
 
   String _formatPhone(String phone) {
     if (phone.length == 10) {
-      return '${phone.substring(0,5)} ${phone.substring(5)}';
+      return '${phone.substring(0, 5)} ${phone.substring(5)}';
     }
     return phone;
   }
 }
 
-// ─── OTP Box Row ──────────────────────────────────────────
+// ─── OTP Box Row ──────────────────────────────────────────────────────────────
 class _OtpBoxes extends StatelessWidget {
   final List<TextEditingController> controllers;
-  final List<FocusNode> focusNodes;
-  final Function(String, int) onInput;
-  final Function(KeyEvent, int) onKeyDown;
+  final List<FocusNode>             focusNodes;
+  final Function(String, int)       onInput;
+  final Function(KeyEvent, int)     onKeyDown;
   final bool hasError;
+  final bool disabled;
 
   const _OtpBoxes({
     required this.controllers,
@@ -376,6 +388,7 @@ class _OtpBoxes extends StatelessWidget {
     required this.onInput,
     required this.onKeyDown,
     required this.hasError,
+    required this.disabled,
   });
 
   @override
@@ -385,10 +398,11 @@ class _OtpBoxes extends StatelessWidget {
       children: List.generate(controllers.length, (i) {
         return _OtpBox(
           controller: controllers[i],
-          focusNode: focusNodes[i],
-          onChanged: (v) => onInput(v, i),
+          focusNode:  focusNodes[i],
+          onChanged:  (v) => onInput(v, i),
           onKeyEvent: (e) => onKeyDown(e, i),
-          hasError: hasError,
+          hasError:   hasError,
+          disabled:   disabled,
         );
       }),
     );
@@ -397,10 +411,11 @@ class _OtpBoxes extends StatelessWidget {
 
 class _OtpBox extends StatelessWidget {
   final TextEditingController controller;
-  final FocusNode focusNode;
-  final ValueChanged<String> onChanged;
-  final Function(KeyEvent) onKeyEvent;
+  final FocusNode             focusNode;
+  final ValueChanged<String>  onChanged;
+  final Function(KeyEvent)    onKeyEvent;
   final bool hasError;
+  final bool disabled;
 
   const _OtpBox({
     required this.controller,
@@ -408,6 +423,7 @@ class _OtpBox extends StatelessWidget {
     required this.onChanged,
     required this.onKeyEvent,
     required this.hasError,
+    required this.disabled,
   });
 
   @override
@@ -423,23 +439,27 @@ class _OtpBox extends StatelessWidget {
             duration: const Duration(milliseconds: 150),
             width: 48, height: 58,
             decoration: BoxDecoration(
-              color: hasError
-                  ? AppColors.error.withValues(alpha: 0.08)
-                  : filled
-                      ? AppColors.primary.withValues(alpha: 0.1)
-                      : AppColors.cardBg,
+              color: disabled
+                  ? AppColors.surface
+                  : hasError
+                      ? AppColors.error.withValues(alpha: 0.08)
+                      : filled
+                          ? AppColors.primary.withValues(alpha: 0.1)
+                          : AppColors.cardBg,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: hasError
-                    ? AppColors.error
-                    : filled
-                        ? AppColors.primary
-                        : focusNode.hasFocus
-                            ? AppColors.primary.withValues(alpha: 0.5)
-                            : AppColors.border,
+                color: disabled
+                    ? AppColors.border
+                    : hasError
+                        ? AppColors.error
+                        : filled
+                            ? AppColors.primary
+                            : focusNode.hasFocus
+                                ? AppColors.primary.withValues(alpha: 0.5)
+                                : AppColors.border,
                 width: filled || focusNode.hasFocus ? 2 : 1,
               ),
-              boxShadow: filled
+              boxShadow: filled && !disabled
                   ? [BoxShadow(
                       color: AppColors.primary.withValues(alpha: 0.2),
                       blurRadius: 10,
@@ -449,20 +469,25 @@ class _OtpBox extends StatelessWidget {
             child: Center(
               child: TextField(
                 controller: controller,
-                focusNode: focusNode,
+                focusNode:  focusNode,
                 keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                maxLength: 1,
+                textAlign:    TextAlign.center,
+                maxLength:    1,
+                enabled:      !disabled,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 style: AppTextStyles.h3.copyWith(
-                  color: hasError ? AppColors.error : AppColors.textPrimary,
+                  color: disabled
+                      ? AppColors.textMuted
+                      : hasError
+                          ? AppColors.error
+                          : AppColors.textPrimary,
                 ),
                 decoration: const InputDecoration(
-                  border: InputBorder.none,
+                  border:        InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
-                  counterText: '',
-                  isDense: true,
+                  counterText:   '',
+                  isDense:       true,
                   contentPadding: EdgeInsets.zero,
                 ),
                 onChanged: onChanged,
@@ -475,29 +500,31 @@ class _OtpBox extends StatelessWidget {
   }
 }
 
-// ─── Verify Button ────────────────────────────────────────
+// ─── Verify Button ────────────────────────────────────────────────────────────
 class _VerifyButton extends StatelessWidget {
-  final String otp;
-  final int otpLength;
-  final bool verifying;
+  final String       otp;
+  final int          otpLength;
+  final bool         verifying;
+  final bool         disabled;
   final VoidCallback onVerify;
 
   const _VerifyButton({
     required this.otp,
     required this.otpLength,
     required this.verifying,
+    required this.disabled,
     required this.onVerify,
   });
 
   @override
   Widget build(BuildContext context) {
-    final ready = otp.length == otpLength;
+    final ready = otp.length == otpLength && !disabled;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       height: 56,
       decoration: BoxDecoration(
         gradient: ready ? AppGradients.fire : null,
-        color: ready ? null : AppColors.surface,
+        color:    ready ? null : AppColors.surface,
         borderRadius: BorderRadius.circular(50),
         boxShadow: ready
             ? [BoxShadow(
@@ -530,10 +557,16 @@ class _VerifyButton extends StatelessWidget {
                 : Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.verified_user_rounded, color: Colors.white, size: 20),
+                      Icon(
+                        disabled
+                            ? Icons.lock_rounded
+                            : Icons.verified_user_rounded,
+                        color: ready ? Colors.white : AppColors.textMuted,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Text(
-                        'Verify & Login',
+                        disabled ? 'Request New OTP' : 'Verify & Login',
                         style: AppTextStyles.button.copyWith(
                           color: ready ? Colors.white : AppColors.textMuted,
                         ),
@@ -547,22 +580,27 @@ class _VerifyButton extends StatelessWidget {
   }
 }
 
-// ─── Resend Section ──────────────────────────────────────
+// ─── Resend Section ───────────────────────────────────────────────────────────
 class _ResendSection extends StatelessWidget {
-  final int secondsLeft;
+  final int          secondsLeft;
   final VoidCallback onResend;
+  final bool         isLoading;
 
-  const _ResendSection({required this.secondsLeft, required this.onResend});
+  const _ResendSection({
+    required this.secondsLeft,
+    required this.onResend,
+    required this.isLoading,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final canResend = secondsLeft == 0;
+    final canResend = secondsLeft == 0 && !isLoading;
     return Center(
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            'Didn\'t receive OTP? ',
+            "Didn't receive OTP? ",
             style: AppTextStyles.bodySm.copyWith(color: AppColors.textMuted),
           ),
           GestureDetector(

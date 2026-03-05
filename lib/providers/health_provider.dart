@@ -93,6 +93,7 @@ class HealthProvider extends ChangeNotifier {
   double get caloriesProgress  => (_caloriesBurned / 900).clamp(0, 1);
   double get caloriesRemaining => _caloriesGoal - _caloriesConsumed;
   int    get steps             => _steps;
+  double get stepsProgress     => (_steps / 10000).clamp(0.0, 1.0);
   int    get activeMinutes     => _activeMinutes;
   double get heartRateBpm      => _heartRateBpm;
   double get proteinG          => _proteinG;
@@ -332,6 +333,13 @@ class HealthProvider extends ChangeNotifier {
     if (_uid != null) {
       FirestoreService.instance.addWater(_uid!, ml);
     }
+  }
+
+  /// Set water consumed directly (used by HydrationScreen which owns its own SP state)
+  void setWaterDirectly(int ml) {
+    _waterConsumed = ml.toDouble().clamp(0, _waterGoal * 1.5);
+    _recomputeScore();
+    notifyListeners();
   }
 
   void toggleWaterReminders(bool v) {

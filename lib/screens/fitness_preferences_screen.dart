@@ -112,7 +112,7 @@ class _FitnessPreferencesScreenState extends State<FitnessPreferencesScreen> {
   }
 
   Future<void> _loadFromFirestore() async {
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<GFAuthProvider>();
     if (auth.uid.isEmpty) return;
     try {
       final doc = await FirebaseFirestore.instance
@@ -137,7 +137,7 @@ class _FitnessPreferencesScreenState extends State<FitnessPreferencesScreen> {
 
   Future<void> _save() async {
     setState(() { _saving = true; _saved = false; });
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<GFAuthProvider>();
     if (auth.uid.isEmpty) {
       setState(() => _saving = false);
       return;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'theme/app_theme.dart';
 import 'providers/health_provider.dart';
@@ -37,7 +38,7 @@ class GoFasterApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()..init()),
+        ChangeNotifierProvider(create: (_) => GFAuthProvider()..init()),
         ChangeNotifierProvider(create: (_) => HealthProvider()),
       ],
       child: MaterialApp(
@@ -58,9 +59,11 @@ class GoFasterApp extends StatelessWidget {
   }
 }
 
-// ── Auth Gate ────────────────────────────────────────────
-// Watches auth state; when user becomes authenticated/guest,
-// boots HealthProvider streams and NotificationService.
+// ── Auth Gate ─────────────────────────────────────────────────────────────────
+// Primary source of truth: FirebaseAuth.instance.authStateChanges()
+// If FirebaseAuth has no user  → OnboardingScreen → LoginScreen
+// If FirebaseAuth has a user   → MainShell (home)
+// GFAuthProvider.status is kept in sync by its own authStateChanges listener.
 class _AuthGate extends StatefulWidget {
   const _AuthGate();
 
@@ -69,53 +72,40 @@ class _AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<_AuthGate> {
-  AuthStatus? _lastStatus;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final auth = context.watch<AuthProvider>();
-
-    // Only react when status actually changes to authenticated / guest
-    if (auth.status != _lastStatus) {
-      _lastStatus = auth.status;
-
-      if (auth.status == AuthStatus.authenticated ||
-          auth.status == AuthStatus.guest) {
-        // Defer so the widget tree is stable before calling provider methods
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          final hp   = context.read<HealthProvider>();
-          final uid  = auth.uid.isEmpty ? 'guest_${auth.userPhone}' : auth.uid;
-          final name = auth.userName;
-
-          // Start Firestore real-time streams
-          hp.initForUser(uid, name);
-
-          // Init FCM (request permissions + subscribe topics)
-          NotificationService.instance.init(uid: uid);
-        });
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        // ── Loading / initialising ─────────────────────────────
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const _SplashScreen();
+        }
 
-    switch (auth.status) {
-      case AuthStatus.unknown:
-        return const _SplashScreen();
-      case AuthStatus.unauthenticated:
-        return const OnboardingScreen();
-      case AuthStatus.authenticated:
-      case AuthStatus.guest:
-        return const MainShell();
-    }
+        final user = snapshot.data;
+
+        if (user != null) {
+          // ── Authenticated — boot services once ───────────────
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final hp   = context.read<HealthProvider>();
+            final auth = context.read<GFAuthProvider>();
+            final uid  = user.uid;
+            final name = user.displayName ?? user.phoneNumber ?? 'User';
+            hp.initForUser(uid, name);
+            NotificationService.instance.init(uid: auth.firestoreUid);
+          });
+          return const MainShell();
+        } else {
+          // ── Not authenticated ────────────────────────────────
+          return const OnboardingScreen();
+        }
+      },
+    );
   }
 }
 
-// ── Splash / Loading Screen ───────────────────────────────
+// ── Splash / Loading Screen ───────────────────────────────────────────────────
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
 
