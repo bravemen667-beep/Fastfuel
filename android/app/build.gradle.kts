@@ -19,7 +19,7 @@ if (keyPropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.gofasterhealth.tracker"
+    namespace = "com.gofasterhealth.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -34,7 +34,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.gofasterhealth.tracker"
+        applicationId = "com.gofasterhealth.app"
         minSdk = 26   // health plugin requires minSdk 26 (Android 8.0+)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -44,10 +44,10 @@ android {
     // ── Release signing config ───────────────────────────────────────────────
     signingConfigs {
         create("release") {
-            keyAlias     = keyProperties["keyAlias"]     as String
-            keyPassword  = keyProperties["keyPassword"]  as String
-            storeFile    = file(keyProperties["storeFile"] as String)
-            storePassword= keyProperties["storePassword"] as String
+            keyAlias      = (keyProperties["keyAlias"]     as? String) ?: ""
+            keyPassword   = (keyProperties["keyPassword"]  as? String) ?: ""
+            storeFile     = (keyProperties["storeFile"]    as? String)?.let { file(it) }
+            storePassword = (keyProperties["storePassword"] as? String) ?: ""
         }
     }
 
