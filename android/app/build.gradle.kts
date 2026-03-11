@@ -19,7 +19,7 @@ if (keyPropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.gofasterhealth.app"
+    namespace = "com.gofasterhealth.tracker"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -34,7 +34,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.gofasterhealth.app"
+        applicationId = "com.gofasterhealth.tracker"
         minSdk = 26   // health plugin requires minSdk 26 (Android 8.0+)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

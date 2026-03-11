@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "242417786200-2osdjcabt4lgjottq1utitcddr6uhbij.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gofasterhealth.app",
+            "certificate_hash": "ec84a9e304a876f9305cc2b0fded6fc1ec83b184"
+          }
+        },
+        {
           "client_id": "242417786200-rt6qs4qpkee1g4usspgjnv780j3ijqu8.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
@@ -57,6 +65,14 @@
         }
       },
       "oauth_client": [
+        {
+          "client_id": "242417786200-87kufbh91egb7m69r7jkpbuvitknmpjh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gofasterhealth.tracker",
+            "certificate_hash": "ec84a9e304a876f9305cc2b0fded6fc1ec83b184"
+          }
+        },
         {
           "client_id": "242417786200-gdv5bad5133p4ad99o5jvhp524fqq07t.apps.googleusercontent.com",
           "client_type": 1,

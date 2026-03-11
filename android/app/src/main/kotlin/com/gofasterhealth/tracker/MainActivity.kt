@@ -1,4 +1,4 @@
-package com.gofasterhealth.app
+package com.gofasterhealth.tracker
 
 import io.flutter.embedding.android.FlutterActivity
 
